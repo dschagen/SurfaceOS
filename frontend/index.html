@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SurfaceOS</title>
+<style>
+  :root {
+    --ink: #13233b;
+    --grid: rgba(160, 200, 255, 0.08);
+    --grid-major: rgba(160, 200, 255, 0.16);
+    --paper: #eef3fa;
+    --cursor: #8fdcff;
+    --press: #ffb347;
+    --muted: #7d93b2;
+  }
+
+  * { box-sizing: border-box; margin: 0; }
+
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    cursor: none;
+  }
+
+  body {
+    background-color: var(--ink);
+    /* A cutting-mat grid: the page is meant to live on a table. */
+    background-image:
+      linear-gradient(var(--grid-major) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-major) 1px, transparent 1px),
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 120px 120px, 120px 120px, 24px 24px, 24px 24px;
+    color: var(--paper);
+    font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+    display: grid;
+    place-items: center;
+  }
+
+  #status {
+    position: fixed;
+    top: 24px;
+    left: 28px;
+    font-size: 18px;
+    color: var(--muted);
+  }
+
+  #status.live { color: var(--paper); }
+
+  #hint {
+    position: fixed;
+    bottom: 28px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 20px;
+    line-height: 1.5;
+    color: var(--muted);
+    text-align: center;
+  }
+
+  #press-target {
+    width: 340px;
+    height: 180px;
+    border: 3px solid var(--paper);
+    border-radius: 28px;
+    display: grid;
+    place-items: center;
+    text-align: center;
+    font-size: 34px;
+    font-weight: 600;
+    transition: background-color 120ms, color 120ms, transform 120ms;
+  }
+
+  #press-target.hover {
+    background-color: rgba(143, 220, 255, 0.15);
+    border-color: var(--cursor);
+  }
+
+  #press-target.pressed {
+    background-color: var(--press);
+    border-color: var(--press);
+    color: var(--ink);
+    transform: scale(0.96);
+  }
+
+  #count {
+    display: block;
+    font-size: 18px;
+    font-weight: 400;
+    margin-top: 6px;
+    opacity: 0.8;
+  }
+
+  .cursor {
+    position: fixed;
+    left: 0;
+    top: 0;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 150ms;
+  }
+
+  .cursor.visible { opacity: 1; }
+
+  .ring {
+    width: 44px;
+    height: 44px;
+    margin: -22px 0 0 -22px;
+    border: 4px solid var(--cursor);
+    border-radius: 50%;
+    transition: width 80ms, height 80ms, margin 80ms, background-color 80ms;
+  }
+
+  .cursor.pinching .ring {
+    width: 28px;
+    height: 28px;
+    margin: -14px 0 0 -14px;
+    background-color: var(--press);
+    border-color: var(--press);
+  }
+
+  .gesture-label {
+    position: absolute;
+    top: 30px;
+    left: 0;
+    transform: translateX(-50%);
+    font-size: 15px;
+    color: var(--cursor);
+    white-space: nowrap;
+  }
+
+  #snip {
+    position: fixed;
+    border: 3px dashed var(--press);
+    /* The huge spread shadow dims everything outside the selection. */
+    box-shadow: 0 0 0 9999px rgba(5, 10, 20, 0.5);
+    pointer-events: none;
+    display: none;
+  }
+
+  #snip.visible { display: block; }
+
+  #snip-size {
+    position: absolute;
+    top: -34px;
+    left: 0;
+    font-size: 16px;
+    color: var(--press);
+    white-space: nowrap;
+  }
+
+  /* While Python takes a screenshot, hide every overlay so it is not in the image. */
+  body.capturing .cursor,
+  body.capturing #snip,
+  body.capturing #status,
+  body.capturing #hint,
+  body.capturing #saved { visibility: hidden; }
+
+  #saved {
+    position: fixed;
+    top: 24px;
+    right: 28px;
+    padding: 12px 18px;
+    border-radius: 12px;
+    background-color: var(--press);
+    color: var(--ink);
+    font-size: 18px;
+    font-weight: 600;
+    opacity: 0;
+    transform: translateY(-8px);
+    transition: opacity 200ms, transform 200ms;
+  }
+
+  #saved.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cursor, .ring, #saved, #press-target { transition: none; }
+  }
+</style>
+</head>
+<body>
+  <div id="status">Start src/main.py to connect the hand tracker</div>
+
+  <div id="press-target">
+    <div>Pinch to press<span id="count">Pressed 0 times</span></div>
+  </div>
+
+  <div id="hint">
+    One hand: point to move, pinch to press<br>
+    Two hands: pinch both, pull apart to frame an area, let go to snip
+  </div>
+
+  <div id="snip"><span id="snip-size"></span></div>
+  <div class="cursor"><div class="ring"></div><span class="gesture-label"></span></div>
+  <div class="cursor"><div class="ring"></div><span class="gesture-label"></span></div>
+  <div id="saved"></div>
+
+<script>
+  const SERVER_URL = "ws://localhost:8765";
+
+  const cursors = document.querySelectorAll(".cursor");
+  const target = document.getElementById("press-target");
+  const countText = document.getElementById("count");
+  const snipBox = document.getElementById("snip");
+  const snipSize = document.getElementById("snip-size");
+  const statusText = document.getElementById("status");
+  const savedNotice = document.getElementById("saved");
+
+  let wasPinching = [false, false];
+  let pressCount = 0;
+  let knownSnipCount = null;
+  let savedTimer = null;
+
+  function isOver(element, x, y) {
+    const box = element.getBoundingClientRect();
+    return x >= box.left && x <= box.right && y >= box.top && y <= box.bottom;
+  }
+
+  function showSaved(filename) {
+    savedNotice.textContent = `Saved ${filename}`;
+    savedNotice.classList.add("visible");
+    clearTimeout(savedTimer);
+    savedTimer = setTimeout(() => savedNotice.classList.remove("visible"), 2500);
+  }
+
+  function updateCursors(hands, w, h) {
+    cursors.forEach((cursor, i) => {
+      const hand = hands[i];
+      if (!hand) {
+        cursor.classList.remove("visible", "pinching");
+        return;
+      }
+      cursor.style.transform = `translate(${hand.x * w}px, ${hand.y * h}px)`;
+      cursor.classList.add("visible");
+      cursor.classList.toggle("pinching", hand.pinch);
+      cursor.querySelector(".gesture-label").textContent =
+        hand.gesture === "None" ? "" : hand.gesture.replace("_", " ");
+    });
+  }
+
+  function updatePressTarget(hands, snipping, w, h) {
+    let hovered = false;
+    let pressedNow = false;
+
+    hands.forEach((hand, i) => {
+      const x = hand.x * w;
+      const y = hand.y * h;
+      const over = isOver(target, x, y);
+      hovered = hovered || over;
+
+      // Count a press only on the moment a pinch begins, and not while a snip is running.
+      if (hand.pinch && !wasPinching[i] && over && !snipping) {
+        pressCount += 1;
+        countText.textContent = `Pressed ${pressCount} ${pressCount === 1 ? "time" : "times"}`;
+      }
+      pressedNow = pressedNow || (hand.pinch && over && !snipping);
+    });
+
+    // Slots shift when a hand appears or disappears, so pinch history resets with them.
+    wasPinching = hands.length === wasPinching.length
+      ? hands.map((hand) => hand.pinch)
+      : hands.map(() => true);
+
+    target.classList.toggle("hover", hovered);
+    target.classList.toggle("pressed", pressedNow);
+  }
+
+  function updateSnip(snip, w, h) {
+    if (!snip) {
+      snipBox.classList.remove("visible");
+      return;
+    }
+    const width = (snip.x2 - snip.x1) * w;
+    const height = (snip.y2 - snip.y1) * h;
+    snipBox.style.left = `${snip.x1 * w}px`;
+    snipBox.style.top = `${snip.y1 * h}px`;
+    snipBox.style.width = `${width}px`;
+    snipBox.style.height = `${height}px`;
+    snipSize.textContent = `${Math.round(width)} × ${Math.round(height)}`;
+    snipBox.classList.add("visible");
+  }
+
+  function handleFrame(data) {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const hands = data.hands || [];
+
+    statusText.textContent =
+      hands.length === 0 ? "Connected. Hold your hand up to the camera." :
+      hands.length === 1 ? "Tracking 1 hand" : "Tracking 2 hands";
+
+    updateCursors(hands, w, h);
+    updatePressTarget(hands, Boolean(data.snip), w, h);
+    updateSnip(data.snip, w, h);
+    document.body.classList.toggle("capturing", Boolean(data.capturing));
+
+    // The first message sets the baseline so reconnecting does not replay an old snip.
+    if (knownSnipCount === null) {
+      knownSnipCount = data.snip_count;
+    } else if (data.snip_count > knownSnipCount) {
+      knownSnipCount = data.snip_count;
+      showSaved(data.last_snip);
+    }
+  }
+
+  function connect() {
+    const socket = new WebSocket(SERVER_URL);
+
+    socket.onopen = () => {
+      statusText.classList.add("live");
+      statusText.textContent = "Connected. Hold your hand up to the camera.";
+    };
+
+    socket.onmessage = (event) => handleFrame(JSON.parse(event.data));
+
+    socket.onclose = () => {
+      statusText.classList.remove("live");
+      statusText.textContent = "Hand tracker not running. Start src/main.py, retrying...";
+      cursors.forEach((cursor) => cursor.classList.remove("visible"));
+      snipBox.classList.remove("visible");
+      setTimeout(connect, 1000);
+    };
+  }
+
+  connect();
+</script>
+</body>
+</html>
