@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#070d18" />
+    <title>SurfaceOS · Shell prototype</title>
+    <link rel="stylesheet" href="./styles/main.css" />
+    <script type="module" src="./scripts/app.js"></script>
+  </head>
+  <body>
+    <main id="stage" aria-label="SurfaceOS projected canvas">
+      <div id="ambient" aria-hidden="true"></div>
+      <div id="windows"></div>
+      <div id="selection" hidden></div>
+      <div id="hand-cursor" hidden aria-hidden="true"></div>
+      <section id="welcome" class="welcome" aria-live="polite">
+        <span class="welcome-mark" aria-hidden="true">✦</span>
+        <h1>Your surface is ready.</h1>
+        <p>Double-click empty space, then drag to draw a window.</p>
+        <button id="welcome-create" type="button">Create a window <span aria-hidden="true">↗</span></button>
+      </section>
+      <div id="content-menu" class="content-menu" hidden role="dialog" aria-label="Choose window content">
+        <p class="menu-eyebrow">NEW WINDOW</p>
+        <h2>What goes here?</h2>
+        <button type="button" data-content="workspace"><span class="menu-icon">▦</span><span><strong>Workspace</strong><small>Start with an open canvas</small></span><span class="menu-arrow">↗</span></button>
+        <button type="button" data-content="notes"><span class="menu-icon">✎</span><span><strong>Notes</strong><small>A quick place to write</small></span><span class="menu-arrow">↗</span></button>
+        <button id="menu-cancel" type="button" class="menu-cancel">Cancel</button>
+      </div>
+      <footer class="chrome">
+        <div class="brand"><span class="brand-mark">✦</span><span>SURFACE<span class="brand-light">OS</span></span><span class="prototype">PROTOTYPE</span></div>
+        <div class="actions">
+          <span id="status" role="status">Ready · Double-click to create</span>
+          <button id="new-window" type="button" title="New window (N)">+ New window</button>
+          <button id="demo-layout" type="button" title="Load two example windows">Demo layout</button>
+          <button id="reset" type="button" title="Clear windows">Reset</button>
+          <button id="fullscreen" type="button" title="Toggle fullscreen (F)">⛶</button>
+        </div>
+      </footer>
+    </main>
+  </body>
+</html>

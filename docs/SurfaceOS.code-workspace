@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"name": "SurfaceOS",
+			"path": ".."
+		},
+		{
+			"name": "surfaceos-shell",
+			"path": "../../surfaceos-shell"
+		}
+	],
+	"settings": {}
+}
