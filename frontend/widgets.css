@@ -1,14 +1,105 @@
-.surfaceos-widgets { position: relative; width: 100%; height: 100%; overflow: hidden; user-select: none; }
-.surfaceos-widgets .surfaceos-widget { box-sizing: border-box; position: absolute; margin: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0.5rem; overflow: hidden; overflow-wrap: anywhere; font: 500 clamp(12px, 1.7vw, 22px)/1.25 system-ui, sans-serif; }
-.surfaceos-widgets .surfaceos-widget--button { color: #fff; background: #334dbb; border: 1px solid #91a4ff; border-radius: 12px; cursor: inherit; transition: background-color 120ms, border-color 120ms, transform 120ms; }
-.surfaceos-widgets .surfaceos-widget--text { color: #f3f6ff; background: #20283c; border-radius: 10px; }
+/*
+  SurfaceOS widget styles. Everything is scoped under .surfaceos-widgets, the content element
+  the shell hands to the renderer. Text sizes use container units so they follow the window size.
+  Variant classes (surfaceos-v-*) come from a widget's optional "variant" field.
+*/
+
+.surfaceos-widgets {
+  position: relative; width: 100%; height: 100%; overflow: hidden; user-select: none;
+  container-type: size;
+  --sw-ink: #111625;
+  --sw-panel: #20283c;
+  --sw-button: #334dbb;
+  --sw-button-edge: #91a4ff;
+  --sw-hover: #4460d6;
+  --sw-accent: #ffb347;
+  --sw-text: #f3f6ff;
+  --sw-muted: #9aa6c4;
+  --sw-danger: #d9534f;
+  --sw-good: #3fae7a;
+}
+
+.surfaceos-widgets .surfaceos-widget {
+  box-sizing: border-box; position: absolute; margin: 0;
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  padding: 0 0.4em; overflow: hidden; overflow-wrap: anywhere;
+  font: 500 clamp(10px, 4.5cqmin, 40px)/1.2 system-ui, "Segoe UI", sans-serif;
+}
+
+.surfaceos-widgets .surfaceos-widget--button {
+  color: #fff; background: var(--sw-button); border: 1px solid var(--sw-button-edge); border-radius: 0.5em;
+  cursor: inherit; transition: background-color 120ms, border-color 120ms, transform 120ms;
+}
+.surfaceos-widgets .surfaceos-widget--text { color: var(--sw-text); background: var(--sw-panel); border-radius: 0.4em; }
+.surfaceos-widgets .surfaceos-widget--canvas { padding: 0; display: block; border-radius: 0.3em; background: #0c1120; }
+.surfaceos-widgets .surfaceos-widget--video { padding: 0; object-fit: contain; background: #000; border-radius: 0.3em; }
 
 /* Hand input has no hover cue of its own, so hover and press are drawn from renderer state. */
-.surfaceos-widgets .surfaceos-widget--hover { background: #4460d6; border-color: #c4cfff; }
-.surfaceos-widgets .surfaceos-widget--pressed { background: #ffb347; border-color: #ffb347; color: #13233b; transform: scale(0.96); }
+.surfaceos-widgets .surfaceos-widget--hover { background: var(--sw-hover); border-color: #c4cfff; }
+.surfaceos-widgets .surfaceos-widget--pressed { background: var(--sw-accent); border-color: var(--sw-accent); color: var(--sw-ink); transform: scale(0.96); }
+.surfaceos-widgets .surfaceos-widget--disabled { opacity: 0.4; }
 
-.surfaceos-widgets .surfaceos-widget-warnings { position: absolute; left: 6px; right: 6px; bottom: 6px; margin: 0; padding: 6px 10px 6px 24px; border: 1px dashed #ff8a7a; border-radius: 8px; background: rgba(17, 22, 37, 0.92); color: #ff8a7a; font: 12px/1.4 system-ui, sans-serif; pointer-events: none; }
+/* General variants */
+.surfaceos-widgets .surfaceos-v-bare { background: transparent; border-color: transparent; }
+.surfaceos-widgets .surfaceos-v-left { justify-content: flex-start; text-align: left; }
+.surfaceos-widgets .surfaceos-v-right { justify-content: flex-end; text-align: right; }
+.surfaceos-widgets .surfaceos-v-top { align-items: flex-start; padding-top: 0.3em; }
+.surfaceos-widgets .surfaceos-v-pre { white-space: pre-wrap; }
+/* Keeps the newest lines of long text visible by clipping from the top. */
+.surfaceos-widgets .surfaceos-v-tail { flex-direction: column; justify-content: flex-end; align-items: stretch; text-align: left; padding: 0.4em 0.6em; }
+.surfaceos-widgets .surfaceos-v-mono { font-family: Consolas, "Cascadia Mono", monospace; font-variant-numeric: tabular-nums; }
+.surfaceos-widgets .surfaceos-v-small { font-size: clamp(9px, 3cqmin, 24px); }
+.surfaceos-widgets .surfaceos-v-large { font-size: clamp(14px, 8cqmin, 72px); font-weight: 600; }
+.surfaceos-widgets .surfaceos-v-huge { font-size: clamp(18px, 16cqmin, 160px); font-weight: 600; font-variant-numeric: tabular-nums; }
+.surfaceos-widgets .surfaceos-v-title { font-weight: 700; }
+.surfaceos-widgets .surfaceos-v-muted { color: var(--sw-muted); }
+.surfaceos-widgets .surfaceos-v-error { color: #ff8a7a; }
+.surfaceos-widgets .surfaceos-v-primary { background: var(--sw-good); border-color: #8fe0b8; }
+.surfaceos-widgets .surfaceos-v-accent { background: var(--sw-accent); border-color: #ffd49a; color: var(--sw-ink); }
+.surfaceos-widgets .surfaceos-v-danger { background: var(--sw-danger); border-color: #f2a09d; }
+.surfaceos-widgets .surfaceos-v-ghost { background: transparent; border-color: #4a5680; }
+.surfaceos-widgets .surfaceos-v-selected { background: #5a2fb3; border-color: #c8b2ff; }
+.surfaceos-widgets .surfaceos-v-listening { background: var(--sw-danger); border-color: #ffb0ad; animation: surfaceos-pulse 1s ease-in-out infinite alternate; }
+.surfaceos-widgets .surfaceos-v-alarm { color: var(--sw-ink); background: var(--sw-accent); animation: surfaceos-pulse 0.5s ease-in-out infinite alternate; }
+
+@keyframes surfaceos-pulse { from { opacity: 1; } to { opacity: 0.55; } }
+
+/* Todo check boxes */
+.surfaceos-widgets .surfaceos-v-check { background: transparent; border: 2px solid var(--sw-button-edge); font-weight: 700; }
+.surfaceos-widgets .surfaceos-v-done { text-decoration: line-through; color: var(--sw-muted); }
+
+/* Calendar */
+.surfaceos-widgets .surfaceos-v-day { background: var(--sw-panel); border-color: #33405f; border-radius: 0.3em; font-size: clamp(9px, 3.6cqmin, 30px); }
+.surfaceos-widgets .surfaceos-v-outside { color: #5c6784; }
+.surfaceos-widgets .surfaceos-v-today { border: 2px solid var(--sw-accent); }
+.surfaceos-widgets .surfaceos-v-has-event::after { content: ""; position: absolute; bottom: 12%; left: 50%; width: 0.35em; height: 0.35em; margin-left: -0.175em; border-radius: 50%; background: var(--sw-accent); }
+.surfaceos-widgets .surfaceos-v-day.surfaceos-v-selected { background: #5a2fb3; border-color: #c8b2ff; color: #fff; }
+
+/* Chess */
+.surfaceos-widgets .surfaceos-v-sq { border: 0; border-radius: 0; padding: 0; font-family: "Segoe UI Symbol", "DejaVu Sans", "Noto Sans Symbols 2", sans-serif; font-size: clamp(12px, 8.5cqmin, 90px); line-height: 1; transform: none; }
+.surfaceos-widgets .surfaceos-v-light { background: #d9c7a3; }
+.surfaceos-widgets .surfaceos-v-dark { background: #8b6a4a; }
+.surfaceos-widgets .surfaceos-v-pw { color: #fff; text-shadow: 0 0 2px #000, 0 0 2px #000, 0 0 1px #000; }
+.surfaceos-widgets .surfaceos-v-pb { color: #111; text-shadow: 0 0 1px #fff; }
+.surfaceos-widgets .surfaceos-v-last { box-shadow: inset 0 0 0 100px rgba(255, 214, 0, 0.28); }
+.surfaceos-widgets .surfaceos-v-sel { box-shadow: inset 0 0 0 100px rgba(80, 160, 255, 0.5); }
+.surfaceos-widgets .surfaceos-v-check-sq { box-shadow: inset 0 0 1.2em 0.2em rgba(230, 40, 40, 0.95); }
+.surfaceos-widgets .surfaceos-v-move::after { content: ""; position: absolute; width: 30%; height: 30%; border-radius: 50%; background: rgba(20, 90, 40, 0.55); }
+.surfaceos-widgets .surfaceos-v-cap { box-shadow: inset 0 0 0 0.18em rgba(20, 110, 40, 0.8); }
+.surfaceos-widgets .surfaceos-v-sq.surfaceos-widget--hover { filter: brightness(1.12); }
+.surfaceos-widgets .surfaceos-v-sq.surfaceos-widget--pressed { filter: brightness(1.3); color: inherit; }
+.surfaceos-widgets .surfaceos-v-sq.surfaceos-v-light.surfaceos-widget--hover,
+.surfaceos-widgets .surfaceos-v-sq.surfaceos-v-light.surfaceos-widget--pressed { background: #d9c7a3; }
+.surfaceos-widgets .surfaceos-v-sq.surfaceos-v-dark.surfaceos-widget--hover,
+.surfaceos-widgets .surfaceos-v-sq.surfaceos-v-dark.surfaceos-widget--pressed { background: #8b6a4a; }
+
+.surfaceos-widgets .surfaceos-widget-warnings {
+  position: absolute; left: 6px; right: 6px; bottom: 6px; margin: 0; padding: 6px 10px 6px 24px; z-index: 1;
+  border: 1px dashed #ff8a7a; border-radius: 8px; background: rgba(17, 22, 37, 0.92); color: #ff8a7a;
+  font: 12px/1.4 system-ui, sans-serif; pointer-events: none;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .surfaceos-widgets .surfaceos-widget--button { transition: none; }
+  .surfaceos-widgets .surfaceos-v-listening, .surfaceos-widgets .surfaceos-v-alarm { animation: none; }
 }

@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SurfaceOS app tests</title>
+<link rel="stylesheet" href="widgets.css">
+<style>
+  body { font-family: Consolas, monospace; background: #13233b; color: #eef3fa; padding: 20px; }
+  .pass { color: #8fdcff; }
+  .fail { color: #ff8a7a; font-weight: bold; }
+  .sandbox { position: absolute; left: -9999px; top: 0; }
+</style>
+</head>
+<body>
+<h1 id="summary">Running...</h1>
+<ul id="results"></ul>
+
+<script type="module">
+  import { mountApp, APPS } from "./apps/app-host.js";
+  import { evaluate, formatNumber } from "./apps/calculator.js";
+  import { fromFEN, newGame, perft, legalMoves, gameStatus, applyMove, chooseAiMove, squareIndex, squareName } from "./apps/chess.js";
+  import { formatStopwatch, formatCountdown } from "./apps/timer.js";
+  import { describeWeather } from "./apps/weather.js";
+  import { monthCells, dateKey } from "./apps/calendar.js";
+  import { createPongGame, stepPong } from "./apps/pong.js";
+
+  const results = document.getElementById("results");
+  let failures = 0;
+
+  async function test(name, fn) {
+    const entry = document.createElement("li");
+    try {
+      await fn();
+      entry.className = "pass";
+      entry.textContent = `PASS ${name}`;
+    } catch (error) {
+      failures += 1;
+      entry.className = "fail";
+      entry.textContent = `FAIL ${name}: ${error.message}`;
+    }
+    results.append(entry);
+  }
+
+  function assertEqual(actual, expected, label = "") {
+    const a = JSON.stringify(actual);
+    const e = JSON.stringify(expected);
+    if (a !== e) throw new Error(`${label} expected ${e}, got ${a}`);
+  }
+
+  function assertThrows(fn, label) {
+    try { fn(); } catch { return; }
+    throw new Error(`${label} did not throw`);
+  }
+
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const fakeDictation = { supported: true, start: ({ onEnd } = {}) => { onEnd?.(); return () => {}; } };
+
+  function mount(type, width = 640, height = 420) {
+    const box = document.createElement("div");
+    box.className = "sandbox";
+    box.style.width = `${width}px`;
+    box.style.height = `${height}px`;
+    document.body.append(box);
+    const warnings = [];
+    const app = mountApp(box, { type, windowId: `test-${type}`, dictation: fakeDictation, warn: (m) => warnings.push(m) });
+    return { box, app, warnings };
+  }
+
+  // Presses a widget by id through the same pointer path the shell uses.
+  function press(app, box, id) {
+    const element = box.querySelector(`[data-widget-id="${id}"]`);
+    if (!element) throw new Error(`no widget ${id}`);
+    const x = (parseFloat(element.style.left) + parseFloat(element.style.width) / 2) / 100;
+    const y = (parseFloat(element.style.top) + parseFloat(element.style.height) / 2) / 100;
+    app.handlePointer({ version: 1, type: "pointer_down", x, y, source: "mouse" });
+    app.handlePointer({ version: 1, type: "pointer_up", x, y, source: "mouse" });
+  }
+  const textOf = (box, id) => box.querySelector(`[data-widget-id="${id}"]`)?.textContent;
+
+  // ---- Calculator ----
+
+  await test("calculator follows operator precedence and parentheses", () => {
+    assertEqual(evaluate("2+3×4"), 14);
+    assertEqual(evaluate("(2+3)×4"), 20);
+    assertEqual(evaluate("-3+5"), 2);
+    assertEqual(evaluate("2×-3"), -6);
+    assertEqual(evaluate("1.5+.5"), 2);
+    assertEqual(evaluate("8÷4÷2"), 1);
+    assertEqual(formatNumber(evaluate("0.1+0.2")), "0.3");
+  });
+
+  await test("calculator rejects bad input without running code", () => {
+    assertThrows(() => evaluate("1÷0"), "divide by zero");
+    assertThrows(() => evaluate("3+"), "trailing operator");
+    assertThrows(() => evaluate("((2)"), "unbalanced");
+    assertThrows(() => evaluate("alert(1)"), "letters");
+  });
+
+  await test("calculator app computes through button presses", async () => {
+    const { app, box } = mount("calculator");
+    for (const id of ["key-7", "key-times", "key-6", "key-equals"]) { press(app, box, id); await tick(); }
+    assertEqual(textOf(box, "display"), "42");
+    press(app, box, "key-2"); await tick();
+    assertEqual(textOf(box, "display"), "2", "digit after = starts fresh");
+    app.destroy();
+  });
+
+  // ---- Chess ----
+
+  await test("chess move generation matches perft from the start position", () => {
+    const start = newGame();
+    assertEqual(perft(start, 1), 20, "depth 1");
+    assertEqual(perft(start, 2), 400, "depth 2");
+    assertEqual(perft(start, 3), 8902, "depth 3");
+  });
+
+  await test("chess perft covers castling, en passant, and promotion", () => {
+    const kiwipete = fromFEN("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1");
+    assertEqual(perft(kiwipete, 1), 48, "kiwipete depth 1");
+    assertEqual(perft(kiwipete, 2), 2039, "kiwipete depth 2");
+    const endgame = fromFEN("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1");
+    assertEqual(perft(endgame, 3), 2812, "position 3 depth 3");
+    const promotion = fromFEN("n1n5/PPPk4/8/8/8/8/4Kppp/5N1N b - - 0 1");
+    assertEqual(perft(promotion, 2), 496, "promotion depth 2");
+    assertEqual(perft(promotion, 3), 9483, "promotion depth 3");
+  });
+
+  await test("chess detects checkmate and stalemate", () => {
+    let state = newGame();
+    for (const [from, to] of [["f2", "f3"], ["e7", "e5"], ["g2", "g4"], ["d8", "h4"]]) {
+      state = applyMove(state, legalMoves(state).find((m) => m.from === squareIndex(from) && m.to === squareIndex(to)));
+    }
+    assertEqual(gameStatus(state).result, "checkmate", "fool's mate");
+    assertEqual(gameStatus(fromFEN("7k/5Q2/6K1/8/8/8/8/8 b - - 0 1")).result, "stalemate");
+  });
+
+  await test("chess AI captures a checking piece for free", () => {
+    const state = fromFEN("k7/8/8/8/8/8/1q6/R6K b - - 0 1");
+    const move = chooseAiMove(state, () => 0);
+    assertEqual([squareName(move.from), squareName(move.to)], ["b2", "a1"]);
+  });
+
+  await test("chess app moves a piece with two presses", async () => {
+    const { app, box } = mount("chess", 700, 440);
+    press(app, box, "mode"); await tick();
+    press(app, box, "sq-e2"); await tick();
+    assertEqual(box.querySelector('[data-widget-id="sq-e4"]').className.includes("surfaceos-v-move"), true, "e4 marked as a target");
+    press(app, box, "sq-e4"); await tick();
+    assertEqual(textOf(box, "sq-e4"), "♟︎", "pawn on e4");
+    assertEqual(textOf(box, "sq-e2"), "", "e2 empty");
+    assertEqual(textOf(box, "status"), "Black to move");
+    app.destroy();
+  });
+
+  // ---- Other apps ----
+
+  await test("timer and stopwatch formatting", () => {
+    assertEqual(formatStopwatch(0), "0:00.0");
+    assertEqual(formatStopwatch(61_250), "1:01.2");
+    assertEqual(formatStopwatch(3_723_400), "1:02:03.4");
+    assertEqual(formatCountdown(59_001), "1:00");
+    assertEqual(formatCountdown(0), "0:00");
+    assertEqual(formatCountdown(3_600_000), "1:00:00");
+  });
+
+  await test("timer counts down from a preset", async () => {
+    const { app, box } = mount("timer");
+    press(app, box, "tab-timer"); await tick();
+    press(app, box, "tm-add-10s"); await tick();
+    assertEqual(textOf(box, "display"), "0:10");
+    press(app, box, "tm-toggle"); await tick();
+    assertEqual(textOf(box, "tm-toggle"), "Pause");
+    app.destroy();
+  });
+
+  await test("todo adds, checks, and deletes items", async () => {
+    const { app, box } = mount("todo");
+    app.receiveText("buy milk"); await tick();
+    assertEqual(textOf(box, "item-1"), "Buy milk");
+    press(app, box, "check-1"); await tick();
+    assertEqual(textOf(box, "title"), "Tasks: 0 left");
+    press(app, box, "delete-1"); await tick();
+    assertEqual(textOf(box, "item-1"), undefined);
+    app.destroy();
+  });
+
+  await test("notepad appends dictated sentences and undoes", async () => {
+    const { app, box } = mount("notepad");
+    app.receiveText("hello there."); await tick();
+    app.receiveText("second sentence"); await tick();
+    assertEqual(textOf(box, "page"), "Hello there. Second sentence");
+    press(app, box, "undo"); await tick();
+    assertEqual(textOf(box, "page"), "Hello there.");
+    app.destroy();
+  });
+
+  await test("calendar month grid and events", async () => {
+    const cells = monthCells(2026, 8);
+    assertEqual(cells.length, 42);
+    assertEqual(dateKey(cells[0]), "2026-08-30", "September 2026 starts on a Tuesday");
+    const { app, box } = mount("calendar", 760, 420);
+    app.receiveText("team standup"); await tick();
+    const todayButton = box.querySelector(`[data-widget-id="day-${dateKey(new Date())}"]`);
+    assertEqual(todayButton.className.includes("surfaceos-v-has-event"), true, "event dot");
+    app.destroy();
+  });
+
+  await test("weather codes map to words", () => {
+    assertEqual(describeWeather(0), "Clear");
+    assertEqual(describeWeather(63), "Rain");
+    assertEqual(describeWeather(95), "Thunderstorm");
+  });
+
+  await test("pong scores when the ball passes a paddle", () => {
+    const game = createPongGame(1.6);
+    game.serveIn = 0;
+    game.ball = { x: 0.05, y: 0.05, vx: -1, vy: 0 };
+    game.left.y = game.left.target = 0.9;
+    for (let i = 0; i < 20; i += 1) stepPong(game, 0.02, { ai: true });
+    assertEqual(game.right.score, 1);
+  });
+
+  // ---- Every app renders valid layouts at several window shapes ----
+
+  for (const type of Object.keys(APPS)) {
+    await test(`${type} renders without layout warnings at three sizes`, async () => {
+      for (const [w, h] of [[640, 420], [360, 300], [380, 560]]) {
+        const { app, box, warnings } = mount(type, w, h);
+        await tick();
+        if (warnings.length) throw new Error(`${w}x${h}: ${warnings[0]}`);
+        if (!box.querySelector(".surfaceos-widget")) throw new Error(`${w}x${h}: nothing rendered`);
+        app.destroy();
+        box.remove();
+      }
+    });
+  }
+
+  await test("pong starts a game with a canvas", async () => {
+    const { app, box, warnings } = mount("pong");
+    press(app, box, "play-ai"); await tick();
+    assertEqual(box.querySelector('[data-widget-id="field"]')?.tagName, "CANVAS");
+    assertEqual(warnings, []);
+    app.destroy();
+  });
+
+  const summary = document.getElementById("summary");
+  summary.textContent = failures === 0 ? "ALL TESTS PASSED" : `${failures} TEST(S) FAILED`;
+  summary.className = failures === 0 ? "pass" : "fail";
+  document.body.dataset.done = "true";
+</script>
+</body>
+</html>

@@ -114,12 +114,74 @@
     assertEqual(actions.length, 0, "no action after cancel");
   });
 
-  test("renderLayout cancels a pending press", () => {
+  test("re-rendering keeps a press while its button remains", () => {
     const { renderer, actions } = setup(workspaceLayout("window-1"));
     renderer.handlePointer(p("pointer_down", ...CAPTURE));
     renderer.renderLayout(workspaceLayout("window-1", 1));
     renderer.handlePointer(p("pointer_up", ...CAPTURE));
+    assertEqual(actions.length, 1);
+  });
+
+  test("re-rendering cancels a press when its button is removed or disabled", () => {
+    const { renderer, actions } = setup(workspaceLayout("window-1"));
+    renderer.handlePointer(p("pointer_down", ...CAPTURE));
+    renderer.renderLayout(notesLayout("window-1"));
+    renderer.renderLayout(workspaceLayout("window-1"));
+    renderer.handlePointer(p("pointer_up", ...CAPTURE));
+    assertEqual(actions.length, 0, "removed");
+    renderer.handlePointer(p("pointer_down", ...CAPTURE));
+    const layout = workspaceLayout("window-1");
+    layout.widgets[1].disabled = true;
+    renderer.renderLayout(layout);
+    renderer.handlePointer(p("pointer_up", ...CAPTURE));
+    assertEqual(actions.length, 0, "disabled");
+  });
+
+  test("a layout for a different window cancels the press", () => {
+    const { renderer, actions } = setup(workspaceLayout("window-1"));
+    renderer.handlePointer(p("pointer_down", ...CAPTURE));
+    renderer.renderLayout(workspaceLayout("window-9"));
+    renderer.handlePointer(p("pointer_up", ...CAPTURE));
     assertEqual(actions.length, 0);
+  });
+
+  test("elements are reused across renders", () => {
+    const { box, renderer } = setup(workspaceLayout("window-1"));
+    const before = box.querySelector('[data-widget-id="capture"]');
+    renderer.renderLayout(workspaceLayout("window-1", 3));
+    assertEqual(box.querySelector('[data-widget-id="capture"]') === before, true, "same element");
+    assertEqual(box.querySelector('[data-widget-id="count"]').textContent, "Pressed 3 times");
+  });
+
+  test("disabled buttons render but do not activate", () => {
+    const layout = workspaceLayout("window-1");
+    layout.widgets[1].disabled = true;
+    const { box, renderer, actions } = setup(layout);
+    assertEqual(box.querySelector('[data-widget-id="capture"]').classList.contains("surfaceos-widget--disabled"), true);
+    assertEqual(renderer.handlePointer(p("pointer_down", ...CAPTURE)), false);
+    renderer.handlePointer(p("pointer_up", ...CAPTURE));
+    assertEqual(actions.length, 0);
+  });
+
+  test("variants become class names and invalid ones are warned", () => {
+    const { box } = setup({ version: 1, window_id: "w", widgets: [
+      { id: "a", type: "text", x: 0, y: 0, width: 1, height: 0.5, text: "a", variant: ["large", "left"] },
+      { id: "b", type: "text", x: 0, y: 0.5, width: 1, height: 0.5, text: "b", variant: "x\" onclick=\"y" },
+    ] });
+    const a = box.querySelector('[data-widget-id="a"]');
+    assertEqual(a.classList.contains("surfaceos-v-large") && a.classList.contains("surfaceos-v-left"), true, "classes");
+    assertEqual(box.querySelectorAll(".surfaceos-widget-warnings li").length, 1, "warning");
+    assertEqual(box.querySelector('[data-widget-id="b"]').getAttribute("onclick"), null, "no attribute injection");
+  });
+
+  test("canvas and video widgets are exposed through getElement", () => {
+    const { renderer } = setup({ version: 1, window_id: "w", widgets: [
+      { id: "c", type: "canvas", x: 0, y: 0, width: 0.5, height: 1 },
+      { id: "v", type: "video", x: 0.5, y: 0, width: 0.5, height: 1 },
+    ] });
+    assertEqual(renderer.getElement("c").tagName, "CANVAS");
+    assertEqual(renderer.getElement("v").tagName, "VIDEO");
+    assertEqual(renderer.getElement("missing"), null);
   });
 
   test("layout coordinates are copied, so later edits do not move hit targets", () => {
