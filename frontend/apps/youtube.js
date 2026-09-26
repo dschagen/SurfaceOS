@@ -5,7 +5,7 @@ import { button, text, rows, columns, rect, inset } from './layout.js';
 // player itself ignores pointer input (see widgets.css).
 
 export const DEMO_VIDEOS = [
-  { id: 'aqz-KE-bpKQ', title: 'Big Buck Bunny' },
+  { id: 'VN5K8zFwaPI', title: '11:57PM ASMR Golf in Norway' },
   { id: 'jNQXAC9IVRw', title: 'Me at the zoo' },
   { id: 'M7lc1UVf-VE', title: 'Embedded Web Player Customization' },
 ];
@@ -281,7 +281,7 @@ function create(ctx) {
       const widgets = [
         { id: 'url', type: 'input', ...urlCell, value: draft, placeholder: 'Paste a YouTube link or video ID, then press Enter' },
         button('load', loadCell, 'Load', 'primary', { disabled: !playerReady }),
-        button('demo', demoCell, compact ? 'Next' : 'Next demo', 'subtle', { icon: 'refresh', disabled: !playerReady }),
+        button('demo', demoCell, label('Next demo'), 'subtle', { icon: 'refresh', disabled: !playerReady }),
         { id: 'player', type: 'embed', ...video },
       ];
 
@@ -309,7 +309,7 @@ function create(ctx) {
       const [restartCell, playCell, downCell, muteCell, upCell] = columns(controls, [1, 1.5, 1, 1, 1], 0.02);
       widgets.push(
         button('restart', restartCell, label('Restart'), undefined, { icon: 'reset', disabled: !ready }),
-        button('play', playCell, playing ? 'Pause' : 'Play', ['primary', 'large'], { icon: playing ? 'pause' : 'play', disabled: !ready }),
+        button('play', playCell, playing ? 'Pause' : 'Play', compact ? 'primary' : ['primary', 'large'], { icon: playing ? 'pause' : 'play', disabled: !ready }),
         button('volume-down', downCell, label('Vol −'), undefined, { icon: 'volume-down', disabled: !playerReady }),
         button('mute', muteCell, label(muted ? 'Unmute' : 'Mute'), muted ? 'selected' : undefined, { icon: muted ? 'volume-up' : 'mute', disabled: !playerReady }),
         button('volume-up', upCell, label('Vol +'), undefined, { icon: 'volume-up', disabled: !playerReady }),

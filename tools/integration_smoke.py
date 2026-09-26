@@ -189,7 +189,7 @@ def run(browser: Browser, hand: Hand, base_url: str, hand_url: str) -> None:
     cx, cy = browser.center(".picker")
     browser.send("Input.dispatchMouseEvent", type="mouseWheel", x=cx, y=cy, deltaX=0, deltaY=120)
     browser.wait_for(f"{state}.windows[0].pickerIndex === 1", label="picker scroll")
-    browser.click(*browser.center(".picker button"))
+    browser.click(*browser.center(".picker .picker-confirm"))
     check(browser.eval(f"{state}.windows[0].content") == "calculator", "selected app mounts")
     for key in ["key-7", "key-times", "key-6", "key-equals"]:
         browser.click(*browser.center(f'[data-surfaceos-window="window-1"] [data-widget-id="{key}"]'))
@@ -207,7 +207,7 @@ def run(browser: Browser, hand: Hand, base_url: str, hand_url: str) -> None:
     hand.rectangle(TWO_HAND_PINCH_END, .56, .34, .18, .34)
     check(browser.wait_for(f"{state}.windows.length === 2", label="second window"),
           "two-hand rectangle creates a second nonoverlapping window")
-    browser.click(*browser.center(".surface-window:last-child .picker button"))
+    browser.click(*browser.center(".surface-window:last-child .picker .picker-confirm"))
     check(browser.eval(f"{state}.windows[1].content") == "notes", "second window selected Notes")
     browser.click(*browser.center("#manage-button"))
     browser.click(*browser.center("#dialog button:first-child"))

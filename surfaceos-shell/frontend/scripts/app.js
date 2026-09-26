@@ -139,26 +139,43 @@ function rectForGesture(e){
   const b=pointForEvent({...e,x:e.x+e.width,y:e.y+e.height});
   return a&&b?rectBetween(a,b):null;
 }
+// Windows running a widget app keep their frame across renders, because rebuilding it would
+// reload embedded players (YouTube) and reset app content. Shell-drawn content is rebuilt as before.
 function render(){
-  surfacesLayer.replaceChildren();const {width,height}=stageSize();
+  const {width,height}=stageSize();
+  const oldPlanes=new Map([...surfacesLayer.children].map(p=>[p.dataset.surfaceId,p]));
+  const oldFrames=new Map([...surfacesLayer.querySelectorAll('.surface-window')].map(f=>[f.dataset.windowId,f]));
   for(const s of surfaces){
-    const plane=document.createElement('div');plane.className='surface-plane';plane.dataset.surfaceId=s.id;
+    let plane=oldPlanes.get(s.id);oldPlanes.delete(s.id);
+    if(!plane){
+      plane=document.createElement('div');plane.className='surface-plane';plane.dataset.surfaceId=s.id;
+      const badge=document.createElement('span');badge.className='surface-badge';badge.textContent=`SURFACE ${s.number}`;plane.append(badge);
+      surfacesLayer.append(plane);
+    }
     plane.style.width=`${width}px`;plane.style.height=`${height}px`;
     plane.style.transform=`matrix3d(${cssMatrix(s.h,width,height).join(',')})`;
-    const badge=document.createElement('span');badge.className='surface-badge';badge.textContent=`SURFACE ${s.number}`;plane.append(badge);
     for(const w of windows.filter(w=>w.surface_id===s.id)){
-      const frame=document.createElement('section');frame.className=`surface-window${w.id===activeId?' active':''}`;
-      frame.dataset.windowId=w.id;frame.style.zIndex=String(windows.indexOf(w)+1);rectStyle(frame,w);
-      const bar=document.createElement('div');bar.className='window-header';bar.textContent=`${w.content==='picker'?'Select a program':w.content==='ai'?'Ask AI':w.content==='screenshot'?'Screenshot':renderer?.apps?.find(a=>a.type===w.content)?.title||w.content} · ${w.id}`;
-      const host=document.createElement('div');host.className='widget-host';renderContent(w,host);
-      frame.append(bar,host);
+      const isApp=!!renderer?.apps?.some(a=>a.type===w.content);
+      let frame=oldFrames.get(w.id);oldFrames.delete(w.id);
+      const reuse=isApp&&frame?.parentElement===plane&&frame.dataset.content===w.content;
+      if(!reuse){
+        frame?.remove();
+        frame=document.createElement('section');frame.dataset.windowId=w.id;frame.dataset.content=w.content;
+        const bar=document.createElement('div');bar.className='window-header';
+        const host=document.createElement('div');host.className='widget-host';renderContent(w,host);
+        frame.append(bar,host);plane.append(frame);
+      }
+      frame.className=`surface-window${w.id===activeId?' active':''}`;
+      frame.style.zIndex=String(windows.indexOf(w)+1);rectStyle(frame,w);
+      frame.querySelector('.window-header').textContent=`${w.content==='picker'?'Select a program':w.content==='ai'?'Ask AI':w.content==='screenshot'?'Screenshot':renderer?.apps?.find(a=>a.type===w.content)?.title||w.content} · ${w.id}`;
+      frame.querySelectorAll('.resize-corner').forEach(handle=>handle.remove());
       if(mode==='resize-ready'&&selectedId===w.id) for(const key of ['nw','ne','se','sw']){
         const handle=document.createElement('span');handle.className=`resize-corner ${key}`;handle.dataset.resize=key;frame.append(handle);
       }
-      plane.append(frame);
     }
-    surfacesLayer.append(plane);
   }
+  for(const frame of oldFrames.values())frame.remove();
+  for(const plane of oldPlanes.values())plane.remove();
   renderer?.sync?.(windows.map(({id,content})=>({id,content})));
   if(mode!=='surface-pick')labels.hidden=true;
 }
@@ -168,11 +185,11 @@ function renderContent(w,host){
     const list=[{type:'notes',title:'Notes'},...(renderer?.apps||[])];
     w.pickerIndex=clamp(w.pickerIndex||0,0,list.length-1);
     const heading=document.createElement('p');heading.textContent='SELECT A PROGRAM';
-    const before=document.createElement('div'),current=document.createElement('strong'),after=document.createElement('div');
-    before.textContent=list[(w.pickerIndex-1+list.length)%list.length].title;
+    // The neighbouring entries are buttons, so a click or a pinch steps the list without needing the scroll gesture.
+    const step=(delta,label)=>{const b=document.createElement('button');b.type='button';b.className='picker-step';b.textContent=`${delta<0?'▲':'▼'} ${label}`;b.addEventListener('click',()=>cyclePicker(w.id,delta));return b;};
+    const before=step(-1,list[(w.pickerIndex-1+list.length)%list.length].title),current=document.createElement('strong'),after=step(1,list[(w.pickerIndex+1)%list.length].title);
     current.textContent=`> ${list[w.pickerIndex].title} <`;
-    after.textContent=list[(w.pickerIndex+1)%list.length].title;
-    const hint=document.createElement('button');hint.type='button';hint.textContent='Pinch to confirm · Click to confirm';hint.addEventListener('click',()=>selectProgram(w.id));
+    const hint=document.createElement('button');hint.type='button';hint.className='picker-confirm';hint.textContent=`Open ${list[w.pickerIndex].title}`;hint.addEventListener('click',()=>selectProgram(w.id));
     picker.append(heading,before,current,after,hint);
     picker.addEventListener('wheel',e=>{e.preventDefault();cyclePicker(w.id,e.deltaY>0?1:-1);},{passive:false});
     host.append(picker);return;
@@ -326,7 +343,9 @@ function handleInput(raw,target=null){
   target??=at(e);
   if(raw.source==='hand'){cursor.hidden=false;cursor.style.left=`${e.x*100}%`;cursor.style.top=`${e.y*100}%`;}
   if(e.type==='pointer_down'){
-    if(raw.source==='hand'&&target?.closest('button')){interaction={button:target.closest('button')};return true;}
+    // Widget-renderer buttons act on pointer events, not native clicks, so hand presses on them go to the window content below.
+    const shellButton=target?.closest('button');
+    if(raw.source==='hand'&&shellButton&&!shellButton.closest('.surfaceos-widgets')){interaction={button:shellButton};return true;}
     if(mode==='transfer-ready'){placeTransfer(e);return true;}
     if(mode==='target'){
       const id=target?.closest('.surface-window')?.dataset.windowId;if(id){chooseTarget(id);return true;}return false;

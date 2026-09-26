@@ -62,22 +62,67 @@ def wait_playing(browser: Browser, timeout: float = 20) -> bool:
     return False
 
 
+def dialog_choice(browser: Browser, text: str) -> None:
+    """Clicks the shell's prompt button with this label."""
+    point = browser.wait_for(f"""(() => {{ const b = [...document.querySelectorAll('#dialog button')].find(b => b.textContent === {text!r});
+        if (!b || document.querySelector('#dialog').hidden) return null; const r = b.getBoundingClientRect();
+        return [r.left + r.width / 2, r.top + r.height / 2]; }})()""", label=f"dialog button {text}")
+    browser.click(*point)
+
+
+def open_program(browser: Browser, start: tuple[float, float], end: tuple[float, float], program: str, count: int) -> None:
+    """New window action, draw it, then scroll the program picker to the program and confirm."""
+    state = "window.SurfaceOS.getState()"
+    if not browser.eval("!!document.querySelector('[data-action=\"new\"]')?.offsetParent"):
+        browser.click(*browser.center("#actions-button"))
+        dialog_choice(browser, "Yes")
+    browser.click(*browser.center('[data-action="new"]'))
+    browser.drag(start, end)
+    browser.wait_for(f"{state}.windows.length === {count} && {state}.windows[{count - 1}].content === 'picker'", label="picker")
+    picker = f'[data-window-id="window-{count}"] .picker'
+    for _ in range(20):
+        if browser.eval(f"document.querySelector('{picker} strong').textContent").strip("<> ").lower() == program:
+            break
+        cx, cy = browser.center(picker)
+        browser.send("Input.dispatchMouseEvent", type="mouseWheel", x=cx, y=cy, deltaX=0, deltaY=-120)
+        time.sleep(0.05)
+    browser.click(*browser.center(f"{picker} .picker-confirm"))
+
+
+def manage(browser: Browser, operation: str, window_id: str) -> None:
+    """Manage -> Yes -> Move or Resize -> Yes -> click the target window."""
+    browser.click(*browser.center("#manage-button"))
+    dialog_choice(browser, "Yes")
+    dialog_choice(browser, operation)
+    dialog_choice(browser, "Yes")
+    browser.click(*browser.center(f'[data-window-id="{window_id}"] .window-header'))
+
+
 def run(browser: Browser, hand: Hand, base_url: str, hand_url: str) -> None:
     state = "window.SurfaceOS.getState()"
     browser.send("Page.navigate", url=f"{base_url}/surfaceos-shell/frontend/?hand={hand_url}")
     browser.wait_for("document.readyState === 'complete' && !!window.SurfaceOS", label="shell loaded")
     browser.wait_for("document.querySelector('#hand-status').textContent.includes('connected')", label="hand bridge")
 
+    print("Setup: one surface, hand alignment on the shown targets")
+    browser.click(*browser.center("#confirm-surface"))
+    browser.click(*browser.center("#finish-setup"))
+    dialog_choice(browser, "Align hands")
+    for _ in range(4):
+        # Pinching exactly on each target makes hand coordinates line up with the page.
+        tx, ty = browser.center(".camera-target")
+        hand.pinch(tx / WIDTH, ty / HEIGHT)
+        time.sleep(0.15)
+    check(browser.wait_for(f"{state}.phase === 'workspace'", label="workspace"), "calibrated and in the workspace")
+
     print("Mouse: open a YouTube window")
-    browser.double_click(300, 250)
-    browser.drag((120, 110), (900, 640))
-    browser.click(*browser.center('#content-menu [data-content="youtube"]'))
+    open_program(browser, (230, 230), (920, 720), "youtube", 1)
     check(browser.eval(f"{state}.windows[0].content") == "youtube", "window-1 runs the YouTube app")
     browser.wait_for(f"!!document.querySelector('{widget('player')} iframe')", timeout=20, label="YouTube iframe")
     check(browser.wait_for(f"!document.querySelector('{widget('play')}').classList.contains('surfaceos-widget--disabled')",
                            timeout=25, label="player ready"), "official IFrame player loaded and ready")
     src = browser.eval(f"document.querySelector('{widget('player')} iframe').src")
-    check("youtube.com/embed/aqz-KE-bpKQ" in src, "demo video cued in the embed")
+    check("youtube.com/embed/VN5K8zFwaPI" in src, "demo video cued in the embed")
 
     print("Mouse: SurfaceOS controls drive the player")
     browser.click(*browser.center(widget("play")))
@@ -85,23 +130,31 @@ def run(browser: Browser, hand: Hand, base_url: str, hand_url: str) -> None:
     muted_fallback = "Muted" in label(browser, "time")
     browser.eval(f"window.__ytFrame = document.querySelector('{widget('player')} iframe')")
 
-    print("Mouse: a second app, move, and resize leave the player alone")
-    browser.click(*browser.center("#new-window"))
-    browser.drag((980, 120), (1500, 560))
-    browser.click(*browser.center('#content-menu [data-content="calculator"]'))
-    check(browser.eval(f"{state}.windows.length") == 2, "second window opened")
+    print("Mouse: a second app, move, resize, and close leave the player alone")
+    open_program(browser, (980, 230), (1400, 600), "calculator", 2)
+    check(browser.eval(f"{state}.windows[1].content") == "calculator", "second window opened with the calculator")
     same_frame = f"window.__ytFrame.isConnected && document.querySelector('{widget('player')} iframe') === window.__ytFrame"
     check(browser.eval(same_frame), "opening another app kept the same player iframe")
     check(wait_playing(browser, 5), "video still playing after the second window opened")
-    before = browser.eval("window.__ytFrame.getBoundingClientRect().width")
+    manage(browser, "Move", "window-1")
+    before_x = browser.eval(f"{state}.windows.find(w => w.id === 'window-1').x")
     hx, hy = browser.center('[data-window-id="window-1"] .window-header')
-    browser.drag((hx - 100, hy), (hx - 60, hy + 30))
-    rx, ry = browser.center('[data-window-id="window-1"] .resize-handle')
+    browser.drag((hx, hy), (hx - 40, hy + 30))
+    browser.send("Input.dispatchKeyEvent", type="keyDown", key="Escape", code="Escape", windowsVirtualKeyCode=27)
+    check(browser.eval(f"{state}.windows.find(w => w.id === 'window-1').x") < before_x, "window moved")
+    check(browser.eval(same_frame), "moving kept the same player iframe")
+    before = browser.eval("window.__ytFrame.getBoundingClientRect().width")
+    manage(browser, "Resize", "window-1")
+    rx, ry = browser.center('[data-window-id="window-1"] [data-resize="se"]')
     browser.drag((rx, ry), (rx - 220, ry - 120))
+    browser.send("Input.dispatchKeyEvent", type="keyDown", key="Escape", code="Escape", windowsVirtualKeyCode=27)
     after = browser.eval("window.__ytFrame.getBoundingClientRect().width")
-    check(browser.eval(same_frame) and after < before - 50, "move and resize kept the player and it followed the window")
+    check(browser.eval(same_frame) and after < before - 50, "resizing kept the player and it followed the window")
     check(wait_playing(browser, 5), "video still playing after move and resize")
-    browser.click(*browser.center('[data-window-id="window-2"] .window-close'))
+    browser.click(*browser.center("#close-button"))
+    dialog_choice(browser, "Yes")
+    browser.click(*browser.center('[data-window-id="window-2"] .window-header'))
+    check(browser.wait_for(f"{state}.windows.length === 1", label="closed"), "second window closed")
     check(browser.eval(same_frame), "closing the other window kept the player")
 
     print("Mouse: pause, restart, volume")
