@@ -26,6 +26,12 @@ button { cursor: pointer; }
 .content-menu small { display: block; font-size: 11px; color: #9eb2c3; margin-top: 2px; }
 .menu-icon { width: 29px; height: 29px; border-radius: 8px; display: grid; place-items: center; background: #24545a; color: #9ff3df; font-size: 18px; }
 .menu-arrow { color: #7ebeb7; }
+.menu-apps { margin-top: 8px; padding-top: 9px; border-top: 1px solid #2d4556; }
+.menu-app-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; }
+.content-menu .menu-app-grid button { padding: 7px 9px; font-size: 12px; background: #16293a; border-color: #2a4152; }
+.content-menu .menu-app-grid button:hover, .content-menu .menu-app-grid button:focus-visible { background: #1e3846; border-color: #426b76; }
+.actions #hand-status { color: #7f95a6; font-size: 11px; padding: 0 4px 0 10px; white-space: nowrap; }
+.actions #hand-status.live { color: #8ce3d1; }
 .content-menu .menu-cancel { justify-content: center; color: #9eb2c3; padding: 7px; margin-top: 4px; font-size: 12px; }
 .surface-window { position: absolute; min-width: 130px; min-height: 90px; border: 1px solid #536b81; border-radius: 15px; overflow: hidden; background: #142334f2; box-shadow: 0 22px 55px #0008, 0 0 0 1px #a1e4ef0c inset; display: flex; flex-direction: column; pointer-events: auto; }
 .surface-window.active { border-color: #79ddcf; box-shadow: 0 24px 65px #0009, 0 0 25px #28d1ac22; }

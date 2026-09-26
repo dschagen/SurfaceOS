@@ -6,15 +6,15 @@ The agreed startup and gesture sequence is in [UX_FLOW.md](UX_FLOW.md). This mou
 
 ## Run
 
-On Windows, unzip the archive and double-click `start_windows.bat`. It starts a local server and opens your browser. Python 3 must be installed. Keep the server window open while testing.
+On Windows, double-click `start_windows.bat`. It serves the repository root and opens the shell in your browser. Python 3 must be installed. Keep the server window open while testing.
 
-Or, from this folder on any system with Python 3:
+Or, from the repository root on any system with Python 3:
 
 ```bash
-python -m http.server 8000 -d frontend
+python -m http.server 8000
 ```
 
-Open `http://localhost:8000` on the laptop or projector. No npm install is required. Press **F** or the fullscreen icon to project fullscreen. Because the scripts are ES modules, opening `index.html` directly from the ZIP or as a `file://` URL is not the supported run path.
+Open `http://localhost:8000/surfaceos-shell/frontend/` on the laptop or projector. The page loads the widget renderer and apps from the repository's `frontend/` folder, so it must be served from the repository root. For hand input, run `python src/main.py` (camera) or `python tools/fake_pointer_stream.py` (scripted); the footer shows `Hand · connected`. `?hand=off` disables the hand connection and `?hand=ws://host:port` points it elsewhere. No npm install is required. Press **F** or the fullscreen icon to project fullscreen. Because the scripts are ES modules, opening `index.html` directly from the ZIP or as a `file://` URL is not the supported run path.
 
 ## Mouse demo
 

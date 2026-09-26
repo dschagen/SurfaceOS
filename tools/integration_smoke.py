@@ -1,0 +1,275 @@
+"""End-to-end smoke test of the shell, widget renderer, and hand-input transport together.
+
+Drives a real headless Edge or Chrome: mouse input goes through the DevTools protocol as native
+mouse events, and hand input goes through the real SurfaceServer WebSocket and protocol encoder.
+
+Run from the repository root:  python tools/integration_smoke.py [--screenshot out.png]
+Needs the `websockets` package and Microsoft Edge or Google Chrome. No camera required.
+"""
+
+import argparse
+import base64
+import json
+import os
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.request
+from pathlib import Path
+
+from websockets.sync.client import connect
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "src"))
+
+from input.events import (DOUBLE_PINCH, POINTER_CANCEL, POINTER_DOWN, POINTER_MOVE,  # noqa: E402
+                          POINTER_UP, SurfaceInputEvent)
+from server.protocol import encode  # noqa: E402
+from server.server import SurfaceServer  # noqa: E402
+
+WIDTH, HEIGHT = 1600, 900
+BROWSERS = [
+    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    "/usr/bin/google-chrome", "/usr/bin/chromium",
+]
+
+
+def free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+class Browser:
+    """Minimal DevTools client: commands, console error collection, and native mouse input."""
+
+    def __init__(self, ws_url: str) -> None:
+        self.ws = connect(ws_url, max_size=50_000_000)
+        self.next_id = 0
+        self.errors: list[str] = []
+
+    def send(self, method: str, **params):
+        self.next_id += 1
+        message_id = self.next_id
+        self.ws.send(json.dumps({"id": message_id, "method": method, "params": params}))
+        while True:
+            message = json.loads(self.ws.recv())
+            if message.get("id") == message_id:
+                if "error" in message:
+                    raise RuntimeError(f"{method}: {message['error']}")
+                return message.get("result", {})
+            self._event(message)
+
+    def _event(self, message: dict) -> None:
+        method = message.get("method")
+        params = message.get("params", {})
+        if method == "Runtime.exceptionThrown":
+            self.errors.append(params["exceptionDetails"].get("exception", {}).get("description", "exception"))
+        elif method == "Runtime.consoleAPICalled" and params.get("type") == "error":
+            self.errors.append(" ".join(str(arg.get("value", arg.get("description", ""))) for arg in params["args"]))
+        elif method == "Log.entryAdded" and params["entry"].get("level") == "error":
+            entry = params["entry"]
+            # The browser requests /favicon.ico on its own; the shell does not ship one.
+            if not entry.get("url", "").endswith("/favicon.ico"):
+                self.errors.append(f"{entry.get('text', 'log error')} {entry.get('url', '')}".strip())
+
+    def eval(self, expression: str):
+        result = self.send("Runtime.evaluate", expression=expression, returnByValue=True, awaitPromise=True)
+        if "exceptionDetails" in result:
+            raise RuntimeError(f"eval failed: {expression}\n{result['exceptionDetails']}")
+        return result["result"].get("value")
+
+    def wait_for(self, expression: str, timeout: float = 5.0, label: str = ""):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            value = self.eval(expression)
+            if value:
+                return value
+            time.sleep(0.05)
+        raise AssertionError(f"Timed out waiting for {label or expression}")
+
+    def mouse(self, kind: str, x: float, y: float, clicks: int = 1, pressed: bool = False) -> None:
+        self.send("Input.dispatchMouseEvent", type=kind, x=x, y=y, button="left" if kind != "mouseMoved" or pressed else "none",
+                  buttons=1 if pressed or kind == "mousePressed" else 0, clickCount=clicks)
+
+    def click(self, x: float, y: float) -> None:
+        self.mouse("mouseMoved", x, y)
+        self.mouse("mousePressed", x, y)
+        self.mouse("mouseReleased", x, y)
+
+    def double_click(self, x: float, y: float) -> None:
+        self.mouse("mousePressed", x, y, 1)
+        self.mouse("mouseReleased", x, y, 1)
+        self.mouse("mousePressed", x, y, 2)
+        self.mouse("mouseReleased", x, y, 2)
+
+    def drag(self, start: tuple[float, float], end: tuple[float, float], steps: int = 12) -> None:
+        self.mouse("mouseMoved", *start)
+        self.mouse("mousePressed", *start)
+        for i in range(1, steps + 1):
+            t = i / steps
+            self.mouse("mouseMoved", start[0] + (end[0] - start[0]) * t, start[1] + (end[1] - start[1]) * t, pressed=True)
+        self.mouse("mouseReleased", *end)
+
+    def center(self, selector: str) -> tuple[float, float]:
+        box = self.wait_for(f"""(() => {{ const e = document.querySelector({json.dumps(selector)});
+            if (!e) return null; const r = e.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }})()""",
+                            label=selector)
+        return box[0], box[1]
+
+
+class Hand:
+    """Sends contract events through the real hand-input server and encoder."""
+
+    def __init__(self, server: SurfaceServer) -> None:
+        self.server = server
+        self.x, self.y = 0.5, 0.5
+
+    def send(self, event_type: str, x: float | None = None, y: float | None = None) -> None:
+        if x is not None:
+            self.x, self.y = x, y
+        self.server.publish(encode(SurfaceInputEvent(event_type, 0, self.x, self.y)))
+        time.sleep(1 / 30)
+
+    def move(self, x: float, y: float, steps: int = 8) -> None:
+        sx, sy = self.x, self.y
+        for i in range(1, steps + 1):
+            t = i / steps
+            self.send(POINTER_MOVE, sx + (x - sx) * t, sy + (y - sy) * t)
+
+    def pinch(self, x: float, y: float) -> None:
+        self.move(x, y)
+        self.send(POINTER_DOWN)
+        self.send(POINTER_UP)
+
+
+def check(condition, message: str) -> None:
+    if not condition:
+        raise AssertionError(message)
+    print(f"  ok  {message}")
+
+
+def run(browser: Browser, hand: Hand, base_url: str, hand_url: str) -> None:
+    browser.send("Page.navigate", url=f"{base_url}/surfaceos-shell/frontend/?hand={hand_url}")
+    browser.wait_for("document.readyState === 'complete' && !!window.SurfaceOS", label="shell loaded")
+    browser.wait_for("document.querySelector('.menu-app-grid [data-content=\"calculator\"]') !== null", label="apps in menu")
+    browser.wait_for("document.querySelector('#hand-status').textContent.includes('connected')", label="hand bridge connected")
+    state = "window.SurfaceOS.getState()"
+
+    print("Mouse: create a window, choose Calculator, compute 7 x 6")
+    browser.double_click(300, 250)
+    check(browser.eval(f"{state}.mode") == "armed", "double-click arms window creation")
+    browser.drag((200, 150), (700, 600))
+    check(browser.eval(f"{state}.mode") == "choosing", "drag opens the content menu")
+    browser.click(*browser.center('#content-menu [data-content="calculator"]'))
+    check(browser.eval(f"{state}.windows.map(w => w.content).join()") == "calculator", "window-1 runs the calculator")
+    for key in ["key-7", "key-times", "key-6", "key-equals"]:
+        browser.click(*browser.center(f'[data-surfaceos-window="window-1"] [data-widget-id="{key}"]'))
+    display = '[data-surfaceos-window="window-1"] [data-widget-id="display"]'
+    check(browser.eval(f"document.querySelector('{display}').textContent") == "42", "mouse presses on widgets give 42")
+
+    print("Mouse: second window through the layout contract (Workspace -> Open notes action)")
+    browser.click(*browser.center("#new-window"))
+    browser.drag((900, 150), (1450, 600))
+    browser.click(*browser.center('#content-menu [data-content="workspace"]'))
+    notes_button = '[data-surfaceos-window="window-2"] [data-widget-id="notes"]'
+    check(browser.eval(f"!!document.querySelector('{notes_button}.surfaceos-widget--button')"), "workspace layout drawn by the widget renderer")
+    browser.click(*browser.center(notes_button))
+    check(browser.wait_for(f"{state}.windows.find(w => w.id === 'window-2')?.content === 'notes'", label="notes"), "widget action reached the shell and opened Notes")
+    check(browser.eval(f"document.querySelector('{display}').textContent") == "42", "window-1 kept its state through shell re-renders")
+
+    print("Hand: double pinch, drag a third window, pick Timer by pinching the menu")
+    start, end = (0.05, 0.69), (0.40, 0.91)
+    hand.pinch(*start)                      # first pinch of the double pinch
+    hand.send(DOUBLE_PINCH)
+    hand.send(POINTER_DOWN)                 # second pinch stays down and draws
+    browser.wait_for(f"{state}.mode === 'drawing'", label="hand drawing")
+    hand.move(*end, steps=15)
+    hand.send(POINTER_UP)
+    check(browser.wait_for(f"{state}.mode === 'choosing'", label="menu after hand draw"), "hand drag opens the content menu")
+
+    def to_canvas(point):
+        return point[0] / WIDTH, point[1] / HEIGHT
+
+    hand.pinch(*to_canvas(browser.center('#content-menu [data-content="timer"]')))
+    check(browser.wait_for(f"{state}.windows.length === 3 && {state}.windows[2].content === 'timer'", label="timer window"), "hand pinch on the menu created a Timer window")
+
+    tab = '[data-surfaceos-window="window-3"] [data-widget-id="tab-timer"]'
+    browser.wait_for(f"!!document.querySelector('{tab}')", label="timer tab")
+    hand.pinch(*to_canvas(browser.center(tab)))
+    check(browser.wait_for(f"document.querySelector('{tab}').classList.contains('surfaceos-v-selected')", label="tab selected"), "hand pinch activated a widget")
+
+    other = '[data-surfaceos-window="window-3"] [data-widget-id="tab-stopwatch"]'
+    hand.move(*to_canvas(browser.center(other)))
+    hand.send(POINTER_DOWN)
+    hand.send(POINTER_CANCEL)
+    hand.move(0.5, 0.5)
+    time.sleep(0.3)
+    check(browser.eval(f"document.querySelector('{tab}').classList.contains('surfaceos-v-selected')"), "lost tracking mid-press did not activate the widget")
+    check(browser.eval("document.querySelectorAll('.surfaceos-widget--pressed').length") == 0, "no widget left pressed after pointer_cancel")
+    check(browser.eval(f"document.querySelector('{display}').textContent") == "42", "earlier windows are unaffected")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--screenshot", type=Path)
+    parser.add_argument("--browser")
+    args = parser.parse_args()
+
+    executable = args.browser or next((path for path in BROWSERS if os.path.exists(path)), None) or shutil.which("msedge") or shutil.which("chrome")
+    if not executable:
+        print("No Edge or Chrome found; pass --browser")
+        return 2
+
+    http_port, hand_port, debug_port = free_port(), free_port(), free_port()
+    http = subprocess.Popen([sys.executable, "-m", "http.server", str(http_port), "--bind", "127.0.0.1", "--directory", str(ROOT)],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    hand_server = SurfaceServer("localhost", hand_port)
+    hand_server.start()
+    profile = tempfile.mkdtemp(prefix="surfaceos-smoke-")
+    chrome = subprocess.Popen([executable, "--headless=new", "--disable-gpu", f"--remote-debugging-port={debug_port}",
+                               f"--user-data-dir={profile}", f"--window-size={WIDTH},{HEIGHT}", "--no-first-run", "about:blank"],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        ws_url = None
+        for _ in range(100):
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{debug_port}/json") as response:
+                    ws_url = next(t["webSocketDebuggerUrl"] for t in json.load(response) if t["type"] == "page")
+                break
+            except Exception:
+                time.sleep(0.1)
+        if not ws_url:
+            print("Browser did not start")
+            return 2
+        browser = Browser(ws_url)
+        for domain in ["Page", "Runtime", "Log"]:
+            browser.send(f"{domain}.enable")
+        browser.send("Emulation.setDeviceMetricsOverride", width=WIDTH, height=HEIGHT, deviceScaleFactor=1, mobile=False)
+        run(browser, Hand(hand_server), f"http://127.0.0.1:{http_port}", f"ws://localhost:{hand_port}")
+        if args.screenshot:
+            args.screenshot.write_bytes(base64.b64decode(browser.send("Page.captureScreenshot", format="png")["data"]))
+            print(f"Screenshot saved to {args.screenshot}")
+        browser.eval("0")  # flush pending console events
+        if browser.errors:
+            print("Console errors:\n  " + "\n  ".join(browser.errors))
+            return 1
+        print("SMOKE TEST PASSED")
+        return 0
+    except AssertionError as error:
+        print(f"FAILED: {error}")
+        return 1
+    finally:
+        chrome.terminate()
+        http.terminate()
+        time.sleep(0.5)
+        shutil.rmtree(profile, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

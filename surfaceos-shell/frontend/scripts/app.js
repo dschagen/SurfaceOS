@@ -44,13 +44,24 @@ function focusWindow(id) {
   }
 }
 
+// Apps come from the mounted widget renderer; Workspace and Notes are built into the shell.
+function appFor(content) {
+  return widgetRenderer?.apps?.find(app => app.type === content) ?? null;
+}
+
+function contentInfo(content) {
+  if (content === 'notes') return { title: 'Notes', symbol: '✎' };
+  if (content === 'workspace') return { title: 'Workspace', symbol: '▦' };
+  return { title: appFor(content)?.title ?? content, symbol: '◆' };
+}
+
 function createWindow(bounds, content) {
   const w = { id: `window-${nextId++}`, ...bounds, content, surface_id: 'main', note: '' };
   windows.push(w);
   activeId = w.id;
   mode = 'idle'; pendingBounds = null; menu.hidden = true; selection.hidden = true;
   render();
-  setStatus(`${content === 'notes' ? 'Notes' : 'Workspace'} created · Drag its top bar to move`);
+  setStatus(`${contentInfo(content).title} created · Drag its top bar to move`);
 }
 
 function widgetLayout(w) {
@@ -81,6 +92,11 @@ function renderContent(w, host) {
     host.append(note);
     return;
   }
+  if (appFor(w.content) && widgetRenderer.mountApp) {
+    // The app keeps its own state; the shell still owns the frame and content identity.
+    widgetRenderer.mountApp({ id: w.id, content: w.content }, host, action => console.debug('SurfaceOS app action', action));
+    return;
+  }
   if (widgetRenderer) {
     widgetRenderer.renderLayout(widgetLayout(w), host, dispatchWidgetAction);
     return;
@@ -107,8 +123,9 @@ function render() {
     frame.setAttribute('aria-label', `${w.content} window`);
     setRect(frame, w);
     const header = document.createElement('div'); header.className = 'window-header';
-    const symbol = document.createElement('span'); symbol.className = 'window-symbol'; symbol.textContent = w.content === 'notes' ? '✎' : '▦';
-    const title = document.createElement('span'); title.className = 'window-title'; title.textContent = `${w.content === 'notes' ? 'Notes' : 'Workspace'} · ${w.id}`;
+    const info = contentInfo(w.content);
+    const symbol = document.createElement('span'); symbol.className = 'window-symbol'; symbol.textContent = info.symbol;
+    const title = document.createElement('span'); title.className = 'window-title'; title.textContent = `${info.title} · ${w.id}`;
     const close = document.createElement('button'); close.className = 'window-close'; close.type = 'button'; close.title = 'Close window'; close.setAttribute('aria-label', `Close ${w.id}`); close.textContent = '×';
     close.addEventListener('click', () => {
       windows = windows.filter(item => item.id !== w.id);
@@ -120,6 +137,8 @@ function render() {
     const resize = document.createElement('div'); resize.className = 'resize-handle'; resize.setAttribute('aria-label', 'Resize window');
     frame.append(header, host, resize); windowsLayer.append(frame);
   }
+  // Lets the widget renderer release content for windows that closed or changed content.
+  widgetRenderer?.sync?.(windows.map(({ id, content }) => ({ id, content })));
 }
 
 function armCreation() {
@@ -136,11 +155,27 @@ function showMenu(bounds) {
   mode = 'choosing'; pendingBounds = bounds;
   menu.hidden = false;
   const rect = stage.getBoundingClientRect();
-  const menuWidth = 254, menuHeight = menu.offsetHeight || 210;
-  menu.style.left = `${clamp((bounds.x + bounds.width) * rect.width + 10, 10, rect.width - menuWidth - 10)}px`;
-  menu.style.top = `${clamp((bounds.y + bounds.height) * rect.height + 10, 10, rect.height - menuHeight - 75)}px`;
+  const menuWidth = menu.offsetWidth || 254, menuHeight = menu.offsetHeight || 210;
+  menu.style.left = `${clamp((bounds.x + bounds.width) * rect.width + 10, 10, Math.max(10, rect.width - menuWidth - 10))}px`;
+  menu.style.top = `${clamp((bounds.y + bounds.height) * rect.height + 10, 10, Math.max(10, rect.height - menuHeight - 75))}px`;
   setStatus('Choose what to open in this window');
   menu.querySelector('[data-content]')?.focus();
+}
+
+// Adds a compact grid of the widget renderer's apps below Workspace and Notes.
+function buildAppMenu() {
+  menu.querySelector('.menu-apps')?.remove();
+  const apps = widgetRenderer?.apps ?? [];
+  if (!apps.length) return;
+  const section = document.createElement('div'); section.className = 'menu-apps';
+  const label = document.createElement('p'); label.className = 'menu-eyebrow'; label.textContent = 'APPS';
+  const grid = document.createElement('div'); grid.className = 'menu-app-grid';
+  for (const app of apps) {
+    const item = document.createElement('button'); item.type = 'button'; item.dataset.content = app.type; item.textContent = app.title;
+    grid.append(item);
+  }
+  section.append(label, grid);
+  menu.insertBefore(section, document.querySelector('#menu-cancel'));
 }
 
 function emitContentPointer(w, event) {
@@ -148,8 +183,9 @@ function emitContentPointer(w, event) {
   if (!host) return;
   const box = host.getBoundingClientRect();
   const rect = stage.getBoundingClientRect();
-  const x = clamp((event.x * rect.width - box.left + rect.left) / box.width, 0, 1);
-  const y = clamp((event.y * rect.height - box.top + rect.top) / box.height, 0, 1);
+  // Not clamped: a release outside the window must not count as a release on an edge widget.
+  const x = (event.x * rect.width - box.left + rect.left) / box.width;
+  const y = (event.y * rect.height - box.top + rect.top) / box.height;
   host.dispatchEvent(new CustomEvent('surfaceos:window-pointer', {
     detail: { version: 1, window_id: w.id, type: event.type, x, y, source: event.source }, bubbles: true,
   }));
@@ -159,7 +195,12 @@ function handleInput(event, target = null) {
   if (event?.version !== 1 || typeof event.type !== 'string') return false;
   if (event.type === 'double_pinch') { armCreation(); return true; }
   if (!['pointer_move', 'pointer_down', 'pointer_up', 'pointer_cancel'].includes(event.type)) return false;
-  if (event.type === 'pointer_cancel') { handCursor.hidden = true; cancel(); return true; }
+  if (event.type === 'pointer_cancel') {
+    // Releases a press inside window content too, so no widget stays pressed after tracking is lost.
+    const pressed = mode === 'content' ? windows.find(item => item.id === interaction?.id) : null;
+    if (pressed) emitContentPointer(pressed, event);
+    handCursor.hidden = true; cancel(); return true;
+  }
   if (!Number.isFinite(event.x) || !Number.isFinite(event.y) || event.x < 0 || event.x > 1 || event.y < 0 || event.y > 1) return false;
   target ??= elementAt(event);
   if (event.source === 'hand') {
@@ -289,7 +330,17 @@ document.querySelector('#demo-layout').addEventListener('click', () => {
 document.querySelector('#fullscreen').addEventListener('click', () => {
   if (document.fullscreenElement) document.exitFullscreen(); else stage.requestFullscreen?.();
 });
+// Keyboard fallback for the focused window's app (typing, Pong's second paddle) comes before shortcuts.
+function forwardKey(e) {
+  if (mode !== 'idle' || !activeId || e.ctrlKey || e.metaKey || e.altKey) return false;
+  if (e.target.matches('textarea, input, [contenteditable]')) return false;
+  if (!widgetRenderer?.handleKey?.(activeId, { type: e.type, key: e.key })) return false;
+  e.preventDefault();
+  return true;
+}
+document.addEventListener('keyup', forwardKey);
 document.addEventListener('keydown', e => {
+  if (forwardKey(e)) return;
   if (e.key === 'Escape') cancel();
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.target.matches('textarea, input, [contenteditable]')) return;
@@ -304,7 +355,7 @@ window.SurfaceOS = Object.freeze({
   dispatchWidgetAction,
   mountWidgetRenderer: renderer => {
     if (!renderer || typeof renderer.renderLayout !== 'function') throw new TypeError('Expected renderLayout(layout, host, onAction)');
-    widgetRenderer = renderer; render();
+    widgetRenderer = renderer; buildAppMenu(); render();
   },
   getState: () => ({ mode, windows: structuredClone(windows) }),
   reset: () => { windows = []; activeId = null; cancel(); },

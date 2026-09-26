@@ -6,7 +6,11 @@
     <meta name="theme-color" content="#070d18" />
     <title>SurfaceOS · Shell prototype</title>
     <link rel="stylesheet" href="./styles/main.css" />
+    <!-- Widget renderer and apps live in the repository's frontend/ folder; serve from the repository root. -->
+    <link rel="stylesheet" href="../../frontend/widgets.css" />
     <script type="module" src="./scripts/app.js"></script>
+    <script type="module" src="./scripts/hand-bridge.js"></script>
+    <script type="module" src="../../frontend/shell-adapter.js"></script>
   </head>
   <body>
     <main id="stage" aria-label="SurfaceOS projected canvas">
@@ -30,6 +34,7 @@
       <footer class="chrome">
         <div class="brand"><span class="brand-mark">✦</span><span>SURFACE<span class="brand-light">OS</span></span><span class="prototype">PROTOTYPE</span></div>
         <div class="actions">
+          <span id="hand-status">Hand · connecting</span>
           <span id="status" role="status">Ready · Double-click to create</span>
           <button id="new-window" type="button" title="New window (N)">+ New window</button>
           <button id="demo-layout" type="button" title="Load two example windows">Demo layout</button>

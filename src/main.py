@@ -16,7 +16,7 @@ from vision.preview import draw_preview
 def main() -> None:
     settings = load_settings()
 
-    camera = Camera(settings["camera"]["index"], settings["camera"]["width"],
+    camera = Camera(0, settings["camera"]["width"],
                     settings["camera"]["height"])
     tracker = HandTracker(MODEL_PATH, settings["tracking"]["max_hands"],
                           settings["tracking"]["identity_match_distance"])
