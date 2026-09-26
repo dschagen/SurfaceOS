@@ -1,6 +1,6 @@
 {
   "camera": {
-    "index": 0,
+    "index": 1,
     "width": null,
     "height": null
   },
@@ -12,9 +12,16 @@
     "start_ratio": 0.25,
     "end_ratio": 0.35
   },
-  "double_pinch": {
-    "max_interval_s": 0.45,
-    "max_distance": 0.08
+  "two_hand": {
+    "single_max_spread": 0.05,
+    "double_interval_s": 0.45
+  },
+  "thumbs_down": {
+    "hold_s": 0.5
+  },
+  "scroll": {
+    "flick_min_speed": 1.0,
+    "coast_s": 0.5
   },
   "static_gestures": {
     "min_score": 0.6,
@@ -24,7 +31,7 @@
     "smoothing": 0.5
   },
   "surface": {
-    "mirror_x": true
+    "mirror_x": false
   },
   "server": {
     "host": "localhost",

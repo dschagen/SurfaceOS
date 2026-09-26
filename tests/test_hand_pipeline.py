@@ -13,7 +13,7 @@ class HandPipelineTests(unittest.TestCase):
 
     def setUp(self):
         self.gestures = GestureDetector(SETTINGS)
-        self.interaction = InteractionState(smoothing=0.0)
+        self.interaction = InteractionState(0.0, SETTINGS)
         self.mapper = CoordinateMapper(mirror_x=False)
         self.primary = PrimaryPointer()
         self.now = 0.0

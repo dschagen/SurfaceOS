@@ -1,4 +1,4 @@
-from input.events import Pointer, SurfaceInputEvent
+from input.events import POINTER_EVENTS, Pointer, SurfaceInputEvent
 from utils.geometry import clamp
 
 PROTOCOL_VERSION = 1
@@ -26,14 +26,19 @@ class PrimaryPointer:
 
 
 def encode(event: SurfaceInputEvent, source: str = SOURCE_HAND) -> dict:
-    """Builds the contract message. Out-of-range coordinates are clamped to the canvas."""
-    return {
-        "version": PROTOCOL_VERSION,
-        "type": event.type,
-        "x": round(clamp(event.x), 4),
-        "y": round(clamp(event.y), 4),
-        "source": source,
-    }
+    """Builds the contract message. Positions and sizes are clamped to the canvas.
+
+    Fields an event does not use are left out, for example two_hand_pinch_cancel has no x or y.
+    """
+    message = {"version": PROTOCOL_VERSION, "type": event.type}
+    for field in ("x", "y", "width", "height"):
+        value = getattr(event, field)
+        if value is not None:
+            message[field] = round(clamp(value), 4)
+    if event.dy is not None:
+        message["dy"] = round(event.dy, 4)
+    message["source"] = source
+    return message
 
 
 def hands_debug_message(pointers: list[Pointer], primary_id: int | None) -> dict:
@@ -46,7 +51,7 @@ def hands_debug_message(pointers: list[Pointer], primary_id: int | None) -> dict
                 "id": pointer.id,
                 "x": round(clamp(pointer.x), 4),
                 "y": round(clamp(pointer.y), 4),
-                "pinching": pointer.is_down,
+                "pinching": pointer.is_down or pointer.is_pinching,
                 "primary": pointer.id == primary_id,
             }
             for pointer in pointers
@@ -56,10 +61,13 @@ def hands_debug_message(pointers: list[Pointer], primary_id: int | None) -> dict
 
 def primary_messages(events: list[SurfaceInputEvent], primary: PrimaryPointer,
                      pointers: list[Pointer]) -> list[dict]:
-    """Encodes this frame's events for the primary hand, then updates the primary choice.
+    """Encodes this frame's events, then updates the primary choice.
 
-    Selection happens after encoding so a lost primary hand still delivers its pointer_cancel.
+    Pointer and scroll events are sent only for the primary hand. Gesture events such as
+    thumbs_down and all two-hand events are sent whichever hand made them. Selection happens
+    after encoding so a lost primary hand still delivers its pointer_cancel.
     """
-    messages = [encode(event) for event in events if event.hand_id == primary.hand_id]
+    messages = [encode(event) for event in events
+                if event.type not in POINTER_EVENTS or event.hand_id == primary.hand_id]
     primary.select(pointers)
     return messages

@@ -1,8 +1,10 @@
+import time
+
 import cv2
 
 from calibration.coordinate_mapper import CoordinateMapper
 from gestures.gesture_detector import GestureDetector
-from input.events import POINTER_MOVE
+from input.events import POINTER_MOVE, SCROLL, TWO_HAND_PINCH_MOVE
 from input.interaction_state import InteractionState
 from server.protocol import PrimaryPointer, hands_debug_message, primary_messages
 from server.server import SurfaceServer
@@ -22,7 +24,7 @@ def main() -> None:
                           settings["tracking"]["identity_match_distance"])
     gestures = GestureDetector(settings)
     mapper = CoordinateMapper.from_settings(settings)
-    interaction = InteractionState(settings["pointer"]["smoothing"])
+    interaction = InteractionState(settings["pointer"]["smoothing"], settings)
     primary = PrimaryPointer()
     server = SurfaceServer(settings["server"]["host"], settings["server"]["port"])
     server.start()
@@ -42,16 +44,20 @@ def main() -> None:
                 print("ERROR: Could not read frame")
                 break
 
+            now = time.monotonic()
             hands = tracker.process(frame)
-            states, gesture_events = gestures.update(hands)
-            pointers, input_events = interaction.update(hands, states, gesture_events, mapper)
+            states, gesture_events = gestures.update(hands, now)
+            pointers, input_events = interaction.update(hands, states, gesture_events, mapper, now)
 
             # The hand whose events are sent this frame; primary_messages may hand over afterwards.
             sending_hand = primary.hand_id
             for message in primary_messages(input_events, primary, pointers):
                 server.publish(message)
-                if message["type"] != POINTER_MOVE:
-                    print(f"{message['type']} x={message['x']:.2f} y={message['y']:.2f}")
+                # Moves and scrolls arrive every frame, so only discrete events are printed.
+                if message["type"] not in (POINTER_MOVE, SCROLL, TWO_HAND_PINCH_MOVE):
+                    details = " ".join(f"{key}={value}" for key, value in message.items()
+                                       if key not in ("version", "type", "source"))
+                    print(f"{message['type']} {details}")
             if send_hand_bubbles:
                 server.publish(hands_debug_message(pointers, sending_hand))
 

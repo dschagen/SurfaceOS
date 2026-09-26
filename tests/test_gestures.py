@@ -1,14 +1,16 @@
 import unittest
 
 from helpers import make_hand
-from gestures.double_pinch import DoublePinchDetector
-from gestures.gesture_detector import DOUBLE_PINCH, PINCH_END, PINCH_START, GestureDetector
+from gestures.gesture_detector import PINCH_END, PINCH_START, THUMBS_DOWN, GestureDetector
+from gestures.hand_pose import is_pointing
 from gestures.static_gestures import StaticGestureFilter
 from vision.hand_identity import HandIdentifier
 
 SETTINGS = {
     "pinch": {"start_ratio": 0.25, "end_ratio": 0.35},
-    "double_pinch": {"max_interval_s": 0.45, "max_distance": 0.08},
+    "two_hand": {"single_max_spread": 0.05, "double_interval_s": 0.45},
+    "thumbs_down": {"hold_s": 0.5},
+    "scroll": {"flick_min_speed": 1.0, "coast_s": 0.5},
     "static_gestures": {"min_score": 0.6, "stable_frames": 3},
 }
 
@@ -36,41 +38,51 @@ class GestureDetectorTests(unittest.TestCase):
         _, events = detector.update([], now=0.1)
         self.assertEqual(types(events), [PINCH_END])
 
-    def test_quick_second_pinch_is_double_pinch(self):
+    def test_quick_second_pinch_is_just_a_pinch(self):
         detector = GestureDetector(SETTINGS)
         detector.update([make_hand(pinch_ratio=PINCHED)], now=0.0)
         detector.update([make_hand(pinch_ratio=OPEN)], now=0.15)
         _, events = detector.update([make_hand(pinch_ratio=PINCHED)], now=0.3)
-        self.assertEqual(types(events), [PINCH_START, DOUBLE_PINCH])
-
-    def test_slow_second_pinch_is_not_double_pinch(self):
-        detector = GestureDetector(SETTINGS)
-        detector.update([make_hand(pinch_ratio=PINCHED)], now=0.0)
-        detector.update([make_hand(pinch_ratio=OPEN)], now=0.3)
-        _, events = detector.update([make_hand(pinch_ratio=PINCHED)], now=1.0)
         self.assertEqual(types(events), [PINCH_START])
 
-    def test_static_gesture_event_after_stable_frames(self):
+    def test_thumbs_down_fires_once_after_hold(self):
         detector = GestureDetector(SETTINGS)
-        hand = make_hand(gesture="Open_Palm", score=0.9)
+        hand = make_hand(gesture="Thumb_Down", score=0.9)
+        fired_at = []
+        for frame in range(40):
+            now = frame * 0.05
+            _, events = detector.update([hand], now=now)
+            if THUMBS_DOWN in types(events):
+                fired_at.append(now)
+        # Stable after 3 frames (0.10 s), then held 0.5 s.
+        self.assertEqual(len(fired_at), 1)
+        self.assertAlmostEqual(fired_at[0], 0.6, places=5)
+
+    def test_thumbs_down_released_early_does_not_fire(self):
+        detector = GestureDetector(SETTINGS)
         found = []
-        for frame in range(4):
-            _, events = detector.update([hand], now=frame * 0.03)
-            found.extend(types(events))
-        self.assertEqual(found, ["OPEN_PALM"])
+        for frame in range(8):
+            _, events = detector.update([make_hand(gesture="Thumb_Down", score=0.9)], now=frame * 0.05)
+            found += types(events)
+        for frame in range(8, 30):
+            _, events = detector.update([make_hand(gesture="Open_Palm", score=0.9)], now=frame * 0.05)
+            found += types(events)
+        self.assertNotIn(THUMBS_DOWN, found)
+
+    def test_pointing_state(self):
+        detector = GestureDetector(SETTINGS)
+        states, _ = detector.update([make_hand(pointing=True)], now=0.0)
+        self.assertTrue(states[0].is_pointing)
+        states, _ = detector.update([make_hand()], now=0.1)
+        self.assertFalse(states[0].is_pointing)
 
 
-class DoublePinchDetectorTests(unittest.TestCase):
-    def test_far_apart_pinches_do_not_count(self):
-        detector = DoublePinchDetector(max_interval_s=0.45, max_distance=0.08)
-        self.assertFalse(detector.on_pinch_start(0, (0.2, 0.2), 0.0))
-        self.assertFalse(detector.on_pinch_start(0, (0.6, 0.6), 0.2))
+class HandPoseTests(unittest.TestCase):
+    def test_pointing_pose(self):
+        self.assertTrue(is_pointing(make_hand(pointing=True)))
 
-    def test_third_pinch_starts_new_sequence(self):
-        detector = DoublePinchDetector(max_interval_s=0.45, max_distance=0.08)
-        detector.on_pinch_start(0, (0.5, 0.5), 0.0)
-        self.assertTrue(detector.on_pinch_start(0, (0.5, 0.5), 0.2))
-        self.assertFalse(detector.on_pinch_start(0, (0.5, 0.5), 0.3))
+    def test_default_hand_is_not_pointing(self):
+        self.assertFalse(is_pointing(make_hand()))
 
 
 class StaticGestureFilterTests(unittest.TestCase):

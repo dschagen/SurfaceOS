@@ -1,7 +1,8 @@
 import unittest
 
 import helpers  # noqa: F401
-from input.events import POINTER_CANCEL, POINTER_MOVE, Pointer, SurfaceInputEvent
+from input.events import (POINTER_CANCEL, POINTER_MOVE, SCROLL, THUMBS_DOWN, TWO_HAND_PINCH_CANCEL,
+                          TWO_HAND_PINCH_MOVE, Pointer, SurfaceInputEvent)
 from server.protocol import PrimaryPointer, encode, primary_messages
 
 
@@ -35,6 +36,30 @@ class ProtocolTests(unittest.TestCase):
         primary = PrimaryPointer()
         primary.select([pointer(1, is_down=True)])
         self.assertIsNone(primary.hand_id)
+
+
+class NewEventProtocolTests(unittest.TestCase):
+    def test_two_hand_rectangle_fields(self):
+        message = encode(SurfaceInputEvent(TWO_HAND_PINCH_MOVE, None, 0.2, 0.3, width=0.4, height=0.5))
+        self.assertEqual(message, {"version": 1, "type": "two_hand_pinch_move", "x": 0.2, "y": 0.3,
+                                   "width": 0.4, "height": 0.5, "source": "hand"})
+
+    def test_cancel_has_no_position(self):
+        message = encode(SurfaceInputEvent(TWO_HAND_PINCH_CANCEL, None))
+        self.assertEqual(message, {"version": 1, "type": "two_hand_pinch_cancel", "source": "hand"})
+
+    def test_scroll_keeps_sign_of_dy(self):
+        message = encode(SurfaceInputEvent(SCROLL, 0, 0.5, 0.5, dy=-0.03))
+        self.assertEqual(message["dy"], -0.03)
+
+    def test_gestures_from_any_hand_are_sent(self):
+        primary = PrimaryPointer()
+        primary.select([pointer(0), pointer(1)])
+        events = [SurfaceInputEvent(THUMBS_DOWN, 1, 0.8, 0.8),
+                  SurfaceInputEvent(TWO_HAND_PINCH_CANCEL, None),
+                  SurfaceInputEvent(SCROLL, 1, 0.8, 0.8, dy=0.1)]
+        messages = primary_messages(events, primary, [pointer(0), pointer(1)])
+        self.assertEqual([m["type"] for m in messages], ["thumbs_down", "two_hand_pinch_cancel"])
 
 
 if __name__ == "__main__":

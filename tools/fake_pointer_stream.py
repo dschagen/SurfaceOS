@@ -11,11 +11,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from input.events import (DOUBLE_PINCH, POINTER_CANCEL, POINTER_DOWN, POINTER_MOVE,  # noqa: E402
+from input.events import (POINTER_CANCEL, POINTER_DOWN, POINTER_MOVE,  # noqa: E402
                           POINTER_UP, Pointer, SurfaceInputEvent)
 from server.protocol import encode, hands_debug_message  # noqa: E402
 from server.server import SurfaceServer  # noqa: E402
 from settings import load_settings  # noqa: E402
+
+# The hand service no longer sends this one-hand event; this script still plays it until it is
+# updated for the two-hand events.
+DOUBLE_PINCH = "double_pinch"
 
 FRAME_S = 1 / 30
 

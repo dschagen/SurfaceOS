@@ -3,7 +3,8 @@ import unittest
 from helpers import make_hand
 from calibration.coordinate_mapper import CoordinateMapper
 from gestures.gesture_detector import GestureDetector
-from input.events import DOUBLE_PINCH, POINTER_CANCEL, POINTER_DOWN, POINTER_MOVE, POINTER_UP
+from input.events import (POINTER_CANCEL, POINTER_DOWN, POINTER_MOVE, POINTER_UP, SCROLL,
+                          THUMBS_DOWN, TWO_HAND_PINCH_END, TWO_HAND_PINCH_START)
 from input.interaction_state import InteractionState
 from test_gestures import OPEN, PINCHED, SETTINGS
 
@@ -15,14 +16,14 @@ def types(events):
 class InteractionTests(unittest.TestCase):
     def setUp(self):
         self.gestures = GestureDetector(SETTINGS)
-        self.interaction = InteractionState(smoothing=0.0)
+        self.interaction = InteractionState(0.0, SETTINGS)
         self.mapper = CoordinateMapper(mirror_x=True)
         self.now = 0.0
 
     def step(self, hands, dt=0.1):
         self.now += dt
         states, gesture_events = self.gestures.update(hands, now=self.now)
-        return self.interaction.update(hands, states, gesture_events, self.mapper)
+        return self.interaction.update(hands, states, gesture_events, self.mapper, now=self.now)
 
     def test_every_frame_moves(self):
         _, events = self.step([make_hand(tip=(0.3, 0.4))])
@@ -37,17 +38,71 @@ class InteractionTests(unittest.TestCase):
         _, events = self.step([make_hand(pinch_ratio=OPEN)])
         self.assertEqual(types(events), [POINTER_MOVE, POINTER_UP])
 
-    def test_double_pinch_comes_before_its_pointer_down(self):
-        self.step([make_hand(pinch_ratio=PINCHED)])
-        self.step([make_hand(pinch_ratio=OPEN)])
-        _, events = self.step([make_hand(pinch_ratio=PINCHED)])
-        self.assertEqual(types(events), [POINTER_MOVE, DOUBLE_PINCH, POINTER_DOWN])
-
     def test_lost_hand_cancels(self):
         self.step([make_hand(pinch_ratio=PINCHED)])
         pointers, events = self.step([])
         self.assertEqual(pointers, [])
         self.assertEqual(types(events), [POINTER_CANCEL])
+
+    def test_second_hand_pinching_cancels_first_press(self):
+        self.step([make_hand(0, tip=(0.3, 0.5), pinch_ratio=PINCHED),
+                   make_hand(1, tip=(0.7, 0.5), pinch_ratio=OPEN)])
+        _, events = self.step([make_hand(0, tip=(0.3, 0.5), pinch_ratio=PINCHED),
+                               make_hand(1, tip=(0.7, 0.5), pinch_ratio=PINCHED)])
+        found = types(events)
+        self.assertEqual(found[0], POINTER_CANCEL)
+        self.assertNotIn(POINTER_DOWN, found)
+        self.assertIn(TWO_HAND_PINCH_START, found)
+
+    def test_pointers_report_pinch_during_two_hand_gesture(self):
+        both = [make_hand(0, tip=(0.3, 0.5), pinch_ratio=PINCHED),
+                make_hand(1, tip=(0.7, 0.5), pinch_ratio=PINCHED)]
+        pointers, _ = self.step(both)
+        self.assertTrue(all(p.is_pinching and not p.is_down for p in pointers))
+
+    def test_two_hand_release_sends_no_pointer_up(self):
+        both = [make_hand(0, tip=(0.3, 0.5), pinch_ratio=PINCHED),
+                make_hand(1, tip=(0.7, 0.5), pinch_ratio=PINCHED)]
+        self.step(both)
+        _, events = self.step([make_hand(0, tip=(0.3, 0.5), pinch_ratio=OPEN),
+                               make_hand(1, tip=(0.7, 0.5), pinch_ratio=PINCHED)])
+        self.assertIn(TWO_HAND_PINCH_END, types(events))
+        self.assertNotIn(POINTER_UP, types(events))
+        # The hand still pinching must release before it can press again.
+        _, events = self.step([make_hand(0, tip=(0.3, 0.5), pinch_ratio=OPEN),
+                               make_hand(1, tip=(0.7, 0.5), pinch_ratio=PINCHED)])
+        self.assertNotIn(POINTER_DOWN, types(events))
+
+    def test_pointing_scrolls_with_finger(self):
+        self.step([make_hand(tip=(0.5, 0.4), pointing=True)])
+        _, events = self.step([make_hand(tip=(0.5, 0.45), pointing=True)])
+        scroll = [e for e in events if e.type == SCROLL]
+        self.assertEqual(len(scroll), 1)
+        self.assertAlmostEqual(scroll[0].dy, 0.05)  # finger moved down, dy positive
+
+    def test_open_hand_does_not_scroll(self):
+        self.step([make_hand(tip=(0.5, 0.4))])
+        _, events = self.step([make_hand(tip=(0.5, 0.45))])
+        self.assertNotIn(SCROLL, types(events))
+
+    def test_flick_keeps_scrolling_then_stops(self):
+        self.step([make_hand(tip=(0.5, 0.2), pointing=True)], dt=0.05)
+        self.step([make_hand(tip=(0.5, 0.3), pointing=True)], dt=0.05)   # 2 canvas heights per second
+        coast = []
+        for _ in range(20):                                                 # finger stops, still pointing
+            _, events = self.step([make_hand(tip=(0.5, 0.3), pointing=True)], dt=0.05)
+            coast += [e.dy for e in events if e.type == SCROLL]
+        self.assertGreater(len(coast), 3)
+        self.assertTrue(all(dy > 0 for dy in coast))
+        self.assertTrue(all(a >= b for a, b in zip(coast, coast[1:])))  # slows down
+        self.assertLess(len(coast), 12)                                   # stops within coast_s
+
+    def test_thumbs_down_event(self):
+        found = []
+        for _ in range(12):
+            _, events = self.step([make_hand(gesture="Thumb_Down", score=0.9)])
+            found += types(events)
+        self.assertEqual(found.count(THUMBS_DOWN), 1)
 
 
 if __name__ == "__main__":

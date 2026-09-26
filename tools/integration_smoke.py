@@ -25,10 +25,14 @@ from websockets.sync.client import connect
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from input.events import (DOUBLE_PINCH, POINTER_CANCEL, POINTER_DOWN, POINTER_MOVE,  # noqa: E402
+from input.events import (POINTER_CANCEL, POINTER_DOWN, POINTER_MOVE,  # noqa: E402
                           POINTER_UP, Pointer, SurfaceInputEvent)
 from server.protocol import encode, hands_debug_message  # noqa: E402
 from server.server import SurfaceServer  # noqa: E402
+
+# The hand service no longer sends this one-hand event; the shell still creates windows with it.
+# Replace with the two-hand events once the shell supports them.
+DOUBLE_PINCH = "double_pinch"
 
 WIDTH, HEIGHT = 1600, 900
 BROWSERS = [
