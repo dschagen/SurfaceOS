@@ -56,7 +56,8 @@ class GestureDetector:
             pinch = self._pinch.get(hand_id)
             if pinch is None:
                 pinch = PinchDetector(self._pinch_settings["start_ratio"],
-                                      self._pinch_settings["end_ratio"])
+                                      self._pinch_settings["end_ratio"],
+                                      self._pinch_settings.get("release_grace_s", 0.0))
                 self._pinch[hand_id] = pinch
 
             static = self._static.get(hand_id)
@@ -66,7 +67,7 @@ class GestureDetector:
                 self._static[hand_id] = static
 
             was_pinching = pinch.is_pinching
-            pinch_state = pinch.update(pinch_ratio(hand))
+            pinch_state = pinch.update(pinch_ratio(hand), now)
             if pinch_state.is_pinching and not was_pinching:
                 events.append(GestureEvent(PINCH_START, hand_id))
             elif was_pinching and not pinch_state.is_pinching:
