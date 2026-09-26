@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SurfaceOS widget tests</title>
+<link rel="stylesheet" href="widgets.css">
+<style>
+  body { font-family: Consolas, monospace; background: #13233b; color: #eef3fa; padding: 20px; }
+  .pass { color: #8fdcff; }
+  .fail { color: #ff8a7a; font-weight: bold; }
+  .sandbox { position: absolute; left: -9999px; width: 400px; height: 300px; }
+</style>
+</head>
+<body>
+<h1 id="summary">Running...</h1>
+<ul id="results"></ul>
+
+<script type="module">
+  import { createWidgetRenderer } from "./widget-renderer.js";
+  import { workspaceLayout, notesLayout, brokenLayout } from "./widget-fixtures.js";
+
+  const results = document.getElementById("results");
+  let failures = 0;
+
+  function test(name, fn) {
+    const entry = document.createElement("li");
+    try {
+      fn();
+      entry.className = "pass";
+      entry.textContent = `PASS ${name}`;
+    } catch (error) {
+      failures += 1;
+      entry.className = "fail";
+      entry.textContent = `FAIL ${name}: ${error.message}`;
+    }
+    results.append(entry);
+  }
+
+  function assertEqual(actual, expected, label = "") {
+    const a = JSON.stringify(actual);
+    const e = JSON.stringify(expected);
+    if (a !== e) throw new Error(`${label} expected ${e}, got ${a}`);
+  }
+
+  function setup(layout) {
+    const box = document.createElement("div");
+    box.className = "sandbox";
+    document.body.append(box);
+    const actions = [];
+    const renderer = createWidgetRenderer(box, { onAction: (a) => actions.push(a) });
+    if (layout) renderer.renderLayout(layout);
+    return { box, renderer, actions };
+  }
+
+  const p = (type, x, y) => ({ version: 1, type, x, y, source: "mouse" });
+  // Center of the "capture" button in workspaceLayout.
+  const CAPTURE = [0.28, 0.35];
+  const ASK = [0.72, 0.35];
+
+  // Keep console output quiet for tests that expect warnings.
+  const realWarn = console.warn;
+  console.warn = () => {};
+
+  test("renders buttons and text at normalized positions", () => {
+    const { box } = setup(workspaceLayout("window-1"));
+    const capture = box.querySelector('[data-widget-id="capture"]');
+    assertEqual(capture.classList.contains("surfaceos-widget--button"), true, "button class");
+    assertEqual(capture.tagName, "BUTTON", "native button element");
+    assertEqual(capture.style.left, "8%", "left");
+    assertEqual(capture.style.width, "40%", "width");
+    assertEqual(box.querySelector('[data-widget-id="title"]').textContent, "Workspace", "text");
+    assertEqual(box.querySelectorAll(".surfaceos-widget").length, 5, "widget count");
+  });
+
+  test("press and release on the same button activates once", () => {
+    const { renderer, actions } = setup(workspaceLayout("window-1"));
+    renderer.handlePointer(p("pointer_down", ...CAPTURE));
+    renderer.handlePointer(p("pointer_move", 0.3, 0.36));
+    renderer.handlePointer(p("pointer_up", 0.3, 0.36));
+    assertEqual(actions, [{ version: 1, window_id: "window-1", widget_id: "capture", event: "activate" }]);
+  });
+
+  test("holding and moving does not repeat activations", () => {
+    const { renderer, actions } = setup(workspaceLayout("window-1"));
+    renderer.handlePointer(p("pointer_down", ...CAPTURE));
+    for (let i = 0; i < 10; i += 1) renderer.handlePointer(p("pointer_move", 0.2 + i * 0.01, 0.35));
+    assertEqual(actions.length, 0, "no action while held");
+    renderer.handlePointer(p("pointer_up", ...CAPTURE));
+    assertEqual(actions.length, 1, "one action on release");
+  });
+
+  test("release over a different button does not activate", () => {
+    const { renderer, actions } = setup(workspaceLayout("window-1"));
+    renderer.handlePointer(p("pointer_down", ...CAPTURE));
+    renderer.handlePointer(p("pointer_move", ...ASK));
+    renderer.handlePointer(p("pointer_up", ...ASK));
+    assertEqual(actions.length, 0);
+  });
+
+  test("pressing empty space then releasing on a button does not activate", () => {
+    const { renderer, actions } = setup(workspaceLayout("window-1"));
+    renderer.handlePointer(p("pointer_down", 0.5, 0.5));
+    renderer.handlePointer(p("pointer_up", ...CAPTURE));
+    assertEqual(actions.length, 0);
+  });
+
+  test("pointer_cancel clears the press and pressed styling", () => {
+    const { box, renderer, actions } = setup(workspaceLayout("window-1"));
+    renderer.handlePointer(p("pointer_down", ...CAPTURE));
+    assertEqual(box.querySelector('[data-widget-id="capture"]').classList.contains("surfaceos-widget--pressed"), true, "pressed");
+    renderer.handlePointer({ version: 1, type: "pointer_cancel", source: "hand" });
+    assertEqual(box.querySelectorAll(".surfaceos-widget--pressed").length, 0, "no pressed widgets");
+    renderer.handlePointer(p("pointer_up", ...CAPTURE));
+    assertEqual(actions.length, 0, "no action after cancel");
+  });
+
+  test("renderLayout cancels a pending press", () => {
+    const { renderer, actions } = setup(workspaceLayout("window-1"));
+    renderer.handlePointer(p("pointer_down", ...CAPTURE));
+    renderer.renderLayout(workspaceLayout("window-1", 1));
+    renderer.handlePointer(p("pointer_up", ...CAPTURE));
+    assertEqual(actions.length, 0);
+  });
+
+  test("layout coordinates are copied, so later edits do not move hit targets", () => {
+    const layout = workspaceLayout("window-1");
+    const { renderer, actions } = setup(layout);
+    layout.widgets[1].x = 0.9;
+    renderer.handlePointer(p("pointer_down", ...CAPTURE));
+    renderer.handlePointer(p("pointer_up", ...CAPTURE));
+    assertEqual(actions.length, 1);
+  });
+
+  test("text widgets are not pressable", () => {
+    const { renderer, actions } = setup(workspaceLayout("window-1"));
+    renderer.handlePointer(p("pointer_down", 0.5, 0.1));
+    renderer.handlePointer(p("pointer_up", 0.5, 0.1));
+    assertEqual(actions.length, 0);
+  });
+
+  test("out-of-bounds points hit nothing", () => {
+    const { renderer, actions } = setup({
+      version: 1, window_id: "w", widgets: [{ id: "b", type: "button", x: 0, y: 0, width: 1, height: 1, text: "all" }],
+    });
+    renderer.handlePointer(p("pointer_down", 1.2, 0.5));
+    renderer.handlePointer(p("pointer_up", 1.2, 0.5));
+    renderer.handlePointer(p("pointer_down", 0.5, 0.5));
+    renderer.handlePointer(p("pointer_up", 0.5, -0.1));
+    assertEqual(actions.length, 0);
+  });
+
+  test("hover follows pointer_move", () => {
+    const { box, renderer } = setup(workspaceLayout("window-1"));
+    renderer.handlePointer(p("pointer_move", ...CAPTURE));
+    assertEqual(box.querySelector('[data-widget-id="capture"]').classList.contains("surfaceos-widget--hover"), true, "hover on");
+    renderer.handlePointer(p("pointer_move", 0.5, 0.5));
+    assertEqual(box.querySelectorAll(".surfaceos-widget--hover").length, 0, "hover off");
+  });
+
+  test("two renderers keep their actions separate", () => {
+    const one = setup(workspaceLayout("window-1"));
+    const two = setup(notesLayout("window-2"));
+    two.renderer.handlePointer(p("pointer_down", 0.7, 0.8));
+    two.renderer.handlePointer(p("pointer_up", 0.7, 0.8));
+    assertEqual(one.actions.length, 0, "window-1 actions");
+    assertEqual(two.actions, [{ version: 1, window_id: "window-2", widget_id: "next", event: "activate" }]);
+  });
+
+  test("invalid widgets are skipped with visible warnings", () => {
+    const { box } = setup(brokenLayout("window-2"));
+    assertEqual([...box.querySelectorAll(".surfaceos-widget")].map((e) => e.dataset.widgetId), ["ok", "html"], "rendered ids");
+    assertEqual(box.querySelectorAll(".surfaceos-widget-warnings li").length, 4, "warning count");
+  });
+
+  test("layout text is never parsed as HTML", () => {
+    const { box } = setup(brokenLayout("window-2"));
+    const html = box.querySelector('[data-widget-id="html"]');
+    assertEqual(html.querySelector("b"), null, "no element created");
+    assertEqual(html.textContent, "<b>shown as text, not bold</b>");
+  });
+
+  test("bad layouts do not throw and are rejected", () => {
+    const { box, renderer } = setup();
+    for (const bad of [null, "x", { version: 2, window_id: "w", widgets: [] }, { version: 1, widgets: [] },
+                       { version: 1, window_id: "w", widgets: "no" }]) {
+      assertEqual(renderer.renderLayout(bad), false, JSON.stringify(bad));
+    }
+    assertEqual(box.querySelectorAll(".surfaceos-widget").length, 0, "nothing rendered");
+    assertEqual(box.querySelectorAll(".surfaceos-widget-warnings li").length > 0, true, "visible warning");
+  });
+
+  test("an invalid layout keeps the previous content", () => {
+    const { box, renderer, actions } = setup(workspaceLayout("window-1"));
+    assertEqual(renderer.renderLayout({ version: 2, window_id: "window-1", widgets: [] }), false, "rejected");
+    assertEqual(box.querySelectorAll(".surfaceos-widget").length, 5, "old widgets remain");
+    renderer.handlePointer(p("pointer_down", ...CAPTURE));
+    renderer.handlePointer(p("pointer_up", ...CAPTURE));
+    assertEqual(actions.length, 1, "old widgets still work");
+  });
+
+  test("pointer events must carry version 1", () => {
+    const { renderer, actions } = setup(workspaceLayout("window-1"));
+    const unversioned = { type: "pointer_down", x: CAPTURE[0], y: CAPTURE[1] };
+    assertEqual(renderer.handlePointer(unversioned), false, "rejected");
+    renderer.handlePointer(p("pointer_up", ...CAPTURE));
+    assertEqual(actions.length, 0);
+  });
+
+  test("handlePointer reports whether it used the event", () => {
+    const { renderer } = setup(workspaceLayout("window-1"));
+    assertEqual(renderer.handlePointer(p("pointer_down", 0.5, 0.5)), false, "down on empty space");
+    assertEqual(renderer.handlePointer(p("pointer_up", 0.5, 0.5)), false, "up on empty space");
+    assertEqual(renderer.handlePointer(p("pointer_down", ...CAPTURE)), true, "down on button");
+    assertEqual(renderer.handlePointer({ version: 1, type: "pointer_cancel" }), true, "cancel of a press");
+    assertEqual(renderer.handlePointer(p("pointer_down", ...CAPTURE)), true, "down again");
+    assertEqual(renderer.handlePointer(p("pointer_up", ...CAPTURE)), true, "activation");
+  });
+
+  test("malformed pointer events are ignored", () => {
+    const { renderer, actions } = setup(workspaceLayout("window-1"));
+    renderer.handlePointer(null);
+    renderer.handlePointer({ version: 1, type: "click", x: 0.28, y: 0.35 });
+    renderer.handlePointer({ version: 1, type: "pointer_down", x: "0.28", y: 0.35 });
+    renderer.handlePointer(p("pointer_up", ...CAPTURE));
+    assertEqual(actions.length, 0);
+  });
+
+  test("a throwing onAction handler does not break the renderer", () => {
+    const box = document.createElement("div");
+    document.body.append(box);
+    const realError = console.error;
+    console.error = () => {};
+    const renderer = createWidgetRenderer(box, { onAction: () => { throw new Error("boom"); } });
+    renderer.renderLayout(workspaceLayout("window-1"));
+    renderer.handlePointer(p("pointer_down", ...CAPTURE));
+    renderer.handlePointer(p("pointer_up", ...CAPTURE));
+    console.error = realError;
+    renderer.handlePointer(p("pointer_down", ...ASK));
+    assertEqual(renderer.handlePointer(p("pointer_up", ...ASK)), true, "still activates after a throw");
+  });
+
+  test("clear removes content and ignores later pointers", () => {
+    const { box, renderer, actions } = setup(workspaceLayout("window-1"));
+    renderer.clear();
+    assertEqual(box.querySelectorAll(".surfaceos-widget").length, 0, "no widgets");
+    assertEqual(renderer.handlePointer(p("pointer_down", ...CAPTURE)), false, "down ignored");
+    renderer.handlePointer(p("pointer_up", ...CAPTURE));
+    assertEqual(actions.length, 0, "no actions");
+  });
+
+  console.warn = realWarn;
+  const summary = document.getElementById("summary");
+  summary.textContent = failures === 0 ? "ALL TESTS PASSED" : `${failures} TEST(S) FAILED`;
+  summary.className = failures === 0 ? "pass" : "fail";
+  document.body.dataset.done = "true";
+</script>
+</body>
+</html>

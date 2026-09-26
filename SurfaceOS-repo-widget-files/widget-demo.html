@@ -1,0 +1,18 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SurfaceOS widget demo</title><link rel="stylesheet" href="./widgets.css"><style>body{background:#111625;color:white;font:16px system-ui;padding:2rem}main{display:flex;gap:1rem;flex-wrap:wrap}.window{width:min(43vw,480px);height:300px;min-width:280px;border:2px solid #89a1f8;border-radius:14px;overflow:hidden}pre{white-space:pre-wrap}</style><h1>Widget renderer fixture</h1><p>Click a button; each action should name its own window. Press Escape to cancel a press.</p><main><section class="window" id="one"></section><section class="window" id="two"></section></main><pre id="log" aria-live="polite">No actions yet.</pre><script type="module">
+import {createWidgetRenderer} from './widget-renderer.js';
+const log = document.querySelector('#log');
+for (const [index, id] of ['one', 'two'].entries()) {
+  const el = document.getElementById(id);
+  const renderer = createWidgetRenderer(el,{onAction: action => {log.textContent = JSON.stringify(action, null, 2)}});
+  renderer.renderLayout({version:1,window_id:`window-${index+1}`,widgets:[
+    {id:'title',type:'text',x:.08,y:.08,width:.84,height:.12,text:`Window ${index+1}`},
+    {id:'capture',type:'button',x:.08,y:.24,width:.4,height:.22,text:'Capture area'},
+    {id:'ask',type:'button',x:.52,y:.24,width:.4,height:.22,text:'Ask AI'}]});
+  function pointer(type,e) {const r=el.getBoundingClientRect(); renderer.handlePointer({version:1,type,x:(e.clientX-r.left)/r.width,y:(e.clientY-r.top)/r.height,source:'mouse'});}
+  el.addEventListener('pointerdown', e=>{el.setPointerCapture(e.pointerId);pointer('pointer_down',e)});
+  el.addEventListener('pointermove', e=>pointer('pointer_move',e));
+  el.addEventListener('pointerup', e=>pointer('pointer_up',e));
+  el.addEventListener('pointercancel', ()=>renderer.handlePointer({version:1,type:'pointer_cancel'}));
+  window.addEventListener('keydown',e=>{if(e.key==='Escape')renderer.handlePointer({version:1,type:'pointer_cancel'})});
+}
+</script></html>
