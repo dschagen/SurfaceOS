@@ -51,6 +51,15 @@ button { cursor: pointer; }
 .note-area::placeholder { color: #8a9eaf; }
 .resize-handle { position: absolute; right: 1px; bottom: 1px; width: 22px; height: 22px; cursor: nwse-resize; touch-action: none; background: linear-gradient(135deg,transparent 52%,#80dcca 54%,#80dcca 60%,transparent 62%,transparent 73%,#80dcca 75%,#80dcca 81%,transparent 83%); opacity: .85; }
 #hand-cursor { position: absolute; width: 19px; height: 19px; margin: -9px; z-index: 1100; border: 2px solid #fff; border-radius: 50%; background: #6df5d688; pointer-events: none; box-shadow: 0 0 15px #64ebd9; }
+/* Temporary hand-position bubbles for laptop testing (scripts/hand-bubbles.js). */
+#hand-bubbles { position: absolute; inset: 0; z-index: 1200; pointer-events: none; }
+.hand-bubble { --bubble: #5ee6ff; position: absolute; width: 46px; height: 46px; margin: -23px 0 0 -23px; border: 3px solid var(--bubble); border-radius: 50%; background: color-mix(in srgb, var(--bubble) 18%, transparent); box-shadow: 0 0 18px var(--bubble); pointer-events: none; transition: width 90ms, height 90ms, margin 90ms, background-color 90ms; }
+.hand-bubble[hidden] { display: none; }
+.hand-bubble[data-color="amber"] { --bubble: #ffb547; border-style: dashed; }
+.hand-bubble[data-color="pink"] { --bubble: #ff6fb1; border-style: dotted; }
+.hand-bubble[data-color="lime"] { --bubble: #9dff5c; border-style: double; }
+.hand-bubble.pinching { width: 26px; height: 26px; margin: -13px 0 0 -13px; background: var(--bubble); }
+.hand-bubble span { position: absolute; left: 50%; top: calc(100% + 4px); transform: translateX(-50%); padding: 1px 6px; border-radius: 6px; background: #000c; color: var(--bubble); font: 700 11px/1.3 ui-monospace, Consolas, monospace; white-space: nowrap; }
 .chrome { position: absolute; left: 22px; right: 22px; bottom: 19px; z-index: 1000; display: flex; justify-content: space-between; align-items: center; gap: 16px; pointer-events: none; }
 .brand, .actions { pointer-events: auto; display: flex; align-items: center; }
 .brand { gap: 8px; font-size: 13px; font-weight: 750; letter-spacing: .09em; text-shadow: 0 1px 9px #000; }

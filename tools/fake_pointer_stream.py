@@ -12,8 +12,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from input.events import (DOUBLE_PINCH, POINTER_CANCEL, POINTER_DOWN, POINTER_MOVE,  # noqa: E402
-                          POINTER_UP, SurfaceInputEvent)
-from server.protocol import encode  # noqa: E402
+                          POINTER_UP, Pointer, SurfaceInputEvent)
+from server.protocol import encode, hands_debug_message  # noqa: E402
 from server.server import SurfaceServer  # noqa: E402
 from settings import load_settings  # noqa: E402
 
@@ -21,13 +21,21 @@ FRAME_S = 1 / 30
 
 
 class Script:
-    def __init__(self, server: SurfaceServer) -> None:
+    def __init__(self, server: SurfaceServer, hand_bubbles: bool) -> None:
         self.server = server
+        self.hand_bubbles = hand_bubbles
         self.x, self.y = 0.5, 0.5
+        self.down = False
 
     def send(self, event_type: str) -> None:
         message = encode(SurfaceInputEvent(event_type, 0, self.x, self.y))
         self.server.publish(message)
+        if event_type in (POINTER_DOWN, POINTER_UP, POINTER_CANCEL):
+            self.down = event_type == POINTER_DOWN
+        if self.hand_bubbles:
+            # A cancel means the hand was lost, so the snapshot is empty until it moves again.
+            hands = [] if event_type == POINTER_CANCEL else [Pointer(0, self.x, self.y, self.down, "None")]
+            self.server.publish(hands_debug_message(hands, 0))
         if event_type != POINTER_MOVE:
             print(f"{event_type} x={self.x:.2f} y={self.y:.2f}")
 
@@ -89,7 +97,7 @@ def main() -> None:
     server.start()
     time.sleep(0.5)
     print("Playing fake hand input on a loop. Press Ctrl + C to stop.")
-    script = Script(server)
+    script = Script(server, settings["debug"].get("hand_bubbles", False))
     try:
         while True:
             script.run_once()

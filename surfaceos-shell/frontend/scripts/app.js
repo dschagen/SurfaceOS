@@ -193,7 +193,12 @@ function emitContentPointer(w, event) {
 
 function handleInput(event, target = null) {
   if (event?.version !== 1 || typeof event.type !== 'string') return false;
-  if (event.type === 'double_pinch') { armCreation(); return true; }
+  if (event.type === 'double_pinch') {
+    // Two quick pinches on a window or control are two presses there, not a request for a new window.
+    const over = Number.isFinite(event.x) && Number.isFinite(event.y) ? elementAt(event) : null;
+    if (over?.closest('.surface-window, .chrome, .content-menu, .welcome button')) return false;
+    armCreation(); return true;
+  }
   if (!['pointer_move', 'pointer_down', 'pointer_up', 'pointer_cancel'].includes(event.type)) return false;
   if (event.type === 'pointer_cancel') {
     // Releases a press inside window content too, so no widget stays pressed after tracking is lost.
@@ -221,7 +226,13 @@ function handleInput(event, target = null) {
     }
     if (mode !== 'idle') return false;
     const frame = target?.closest('.surface-window');
-    if (!frame) return false;
+    if (!frame) {
+      // Shell buttons outside windows only receive native mouse clicks, so a hand press
+      // is held here and becomes a click on release over the same button.
+      const control = event.source === 'hand' ? target?.closest('.chrome button, .welcome button') : null;
+      if (!control) return false;
+      mode = 'control'; interaction = { control }; return true;
+    }
     const w = windows.find(item => item.id === frame.dataset.windowId);
     if (!w) return false;
     focusWindow(w.id);
@@ -278,8 +289,10 @@ function handleInput(event, target = null) {
       mode = 'idle'; interaction = null; return true;
     }
     if (mode === 'control' && event.source === 'hand') {
-      if (interaction.control === target?.closest('.window-close')) interaction.control.click();
-      mode = 'idle'; interaction = null; return true;
+      const control = interaction.control;
+      mode = 'idle'; interaction = null;
+      if (control === target?.closest('button')) control.click();
+      return true;
     }
   }
   return false;

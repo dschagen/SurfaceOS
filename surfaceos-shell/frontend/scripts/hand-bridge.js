@@ -7,6 +7,10 @@ const RETRY_MS = 2000;
 const setting = new URLSearchParams(location.search).get('hand');
 const indicator = document.querySelector('#hand-status');
 
+function showHands(hands) {
+  window.dispatchEvent(new CustomEvent('surfaceos:hand-debug', { detail: hands }));
+}
+
 function show(text, live) {
   if (!indicator) return;
   indicator.textContent = text;
@@ -39,9 +43,15 @@ function connect(url) {
       console.warn('Ignoring malformed hand message', message);
       return;
     }
+    // The debug snapshot of all tracked hands goes to the bubble overlay, not the shell.
+    if (message.type === 'hand_debug') {
+      if (Array.isArray(message.hands)) showHands(message.hands);
+      return;
+    }
     window.SurfaceOS?.dispatchInput(message);
   });
   socket.addEventListener('close', () => {
+    showHands([]);
     // A dropped tracker releases any hand press; failed reconnects must not cancel mouse work.
     if (opened) window.SurfaceOS?.dispatchInput({ version: 1, type: 'pointer_cancel', source: 'hand' });
     show('Hand · offline (mouse works)', false);

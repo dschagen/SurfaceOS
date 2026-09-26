@@ -46,6 +46,19 @@ until it leaves the camera. A replacement hand is only chosen while it is not pi
 never sees a press without a `pointer_down`. Multi-pointer support would need a contract change
 (for example an optional `pointer_id`).
 
+## Debug hand snapshot
+
+When `debug.hand_bubbles` is `true` in `config/settings.json`, every frame also sends one snapshot of
+all tracked hands, including hands that are not the primary pointer:
+
+```json
+{ "version": 1, "type": "hand_debug", "hands": [ { "id": 0, "x": 0.42, "y": 0.68, "pinching": true, "primary": true } ] }
+```
+
+Positions are the same clamped canvas values that hand's pointer events carry. An empty `hands` list
+means no hand is tracked. The browser shows these as temporary bubbles and never treats them as
+input; set the flag to `false` for the demo.
+
 ## Testing without a camera
 
 - `python tools/fake_pointer_stream.py` plays a scripted loop: wandering, a click, a double pinch

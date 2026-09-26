@@ -3,6 +3,8 @@ from utils.geometry import clamp
 
 PROTOCOL_VERSION = 1
 SOURCE_HAND = "hand"
+# Debug-only snapshot of every tracked hand; the shell's input handler ignores it.
+HAND_DEBUG = "hand_debug"
 
 
 class PrimaryPointer:
@@ -31,6 +33,24 @@ def encode(event: SurfaceInputEvent, source: str = SOURCE_HAND) -> dict:
         "x": round(clamp(event.x), 4),
         "y": round(clamp(event.y), 4),
         "source": source,
+    }
+
+
+def hands_debug_message(pointers: list[Pointer], primary_id: int | None) -> dict:
+    """Every tracked hand at the same clamped canvas position its pointer events would carry."""
+    return {
+        "version": PROTOCOL_VERSION,
+        "type": HAND_DEBUG,
+        "hands": [
+            {
+                "id": pointer.id,
+                "x": round(clamp(pointer.x), 4),
+                "y": round(clamp(pointer.y), 4),
+                "pinching": pointer.is_down,
+                "primary": pointer.id == primary_id,
+            }
+            for pointer in pointers
+        ],
     }
 
 

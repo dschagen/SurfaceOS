@@ -4,7 +4,7 @@ from calibration.coordinate_mapper import CoordinateMapper
 from gestures.gesture_detector import GestureDetector
 from input.events import POINTER_MOVE
 from input.interaction_state import InteractionState
-from server.protocol import PrimaryPointer, primary_messages
+from server.protocol import PrimaryPointer, hands_debug_message, primary_messages
 from server.server import SurfaceServer
 from settings import MODEL_PATH, load_settings
 from utils.timing import FpsCounter
@@ -16,7 +16,7 @@ from vision.preview import draw_preview
 def main() -> None:
     settings = load_settings()
 
-    camera = Camera(0, settings["camera"]["width"],
+    camera = Camera(settings["camera"]["index"], settings["camera"]["width"],
                     settings["camera"]["height"])
     tracker = HandTracker(MODEL_PATH, settings["tracking"]["max_hands"],
                           settings["tracking"]["identity_match_distance"])
@@ -29,6 +29,8 @@ def main() -> None:
 
     fps = FpsCounter()
     show_preview = settings["debug"]["show_preview"]
+    # Sends every tracked hand to the browser's debug bubbles; turn off for the demo.
+    send_hand_bubbles = settings["debug"].get("hand_bubbles", False)
 
     print("SurfaceOS hand input running.")
     print("Press Q in the preview window (or Ctrl + C here) to quit.")
@@ -44,10 +46,14 @@ def main() -> None:
             states, gesture_events = gestures.update(hands)
             pointers, input_events = interaction.update(hands, states, gesture_events, mapper)
 
+            # The hand whose events are sent this frame; primary_messages may hand over afterwards.
+            sending_hand = primary.hand_id
             for message in primary_messages(input_events, primary, pointers):
                 server.publish(message)
                 if message["type"] != POINTER_MOVE:
                     print(f"{message['type']} x={message['x']:.2f} y={message['y']:.2f}")
+            if send_hand_bubbles:
+                server.publish(hands_debug_message(pointers, sending_hand))
 
             fps.tick()
             if show_preview:

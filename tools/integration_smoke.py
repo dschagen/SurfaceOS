@@ -26,8 +26,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from input.events import (DOUBLE_PINCH, POINTER_CANCEL, POINTER_DOWN, POINTER_MOVE,  # noqa: E402
-                          POINTER_UP, SurfaceInputEvent)
-from server.protocol import encode  # noqa: E402
+                          POINTER_UP, Pointer, SurfaceInputEvent)
+from server.protocol import encode, hands_debug_message  # noqa: E402
 from server.server import SurfaceServer  # noqa: E402
 
 WIDTH, HEIGHT = 1600, 900
@@ -147,6 +147,13 @@ class Hand:
         self.send(POINTER_DOWN)
         self.send(POINTER_UP)
 
+    def hands(self, hands: list[tuple[int, float, float, bool, bool]]) -> None:
+        """Sends the debug snapshot of tracked hands: (id, x, y, pinching, primary)."""
+        pointers = [Pointer(id=hand_id, x=x, y=y, is_down=pinching, gesture="None") for hand_id, x, y, pinching, _ in hands]
+        primary = next((hand_id for hand_id, *_, is_primary in hands if is_primary), None)
+        self.server.publish(hands_debug_message(pointers, primary))
+        time.sleep(0.1)
+
 
 def check(condition, message: str) -> None:
     if not condition:
@@ -160,6 +167,19 @@ def run(browser: Browser, hand: Hand, base_url: str, hand_url: str) -> None:
     browser.wait_for("document.querySelector('.menu-app-grid [data-content=\"calculator\"]') !== null", label="apps in menu")
     browser.wait_for("document.querySelector('#hand-status').textContent.includes('connected')", label="hand bridge connected")
     state = "window.SurfaceOS.getState()"
+
+    def to_canvas(point):
+        return point[0] / WIDTH, point[1] / HEIGHT
+
+    print("Hand: shell buttons outside windows respond to a pinch")
+    hand.pinch(*to_canvas(browser.center("#welcome-create")))
+    check(browser.wait_for(f"{state}.mode === 'armed'", timeout=2, label="armed after hand pinch on Create a window"),
+          "hand pinch on 'Create a window' arms window creation")
+    browser.eval("window.SurfaceOS.reset()")
+    hand.pinch(*to_canvas(browser.center("#new-window")))
+    check(browser.wait_for(f"{state}.mode === 'armed'", timeout=2, label="armed after hand pinch on New window"),
+          "hand pinch on '+ New window' arms window creation")
+    browser.eval("window.SurfaceOS.reset()")
 
     print("Mouse: create a window, choose Calculator, compute 7 x 6")
     browser.double_click(300, 250)
@@ -193,9 +213,6 @@ def run(browser: Browser, hand: Hand, base_url: str, hand_url: str) -> None:
     hand.send(POINTER_UP)
     check(browser.wait_for(f"{state}.mode === 'choosing'", label="menu after hand draw"), "hand drag opens the content menu")
 
-    def to_canvas(point):
-        return point[0] / WIDTH, point[1] / HEIGHT
-
     hand.pinch(*to_canvas(browser.center('#content-menu [data-content="timer"]')))
     check(browser.wait_for(f"{state}.windows.length === 3 && {state}.windows[2].content === 'timer'", label="timer window"), "hand pinch on the menu created a Timer window")
 
@@ -213,6 +230,77 @@ def run(browser: Browser, hand: Hand, base_url: str, hand_url: str) -> None:
     check(browser.eval(f"document.querySelector('{tab}').classList.contains('surfaceos-v-selected')"), "lost tracking mid-press did not activate the widget")
     check(browser.eval("document.querySelectorAll('.surfaceos-widget--pressed').length") == 0, "no widget left pressed after pointer_cancel")
     check(browser.eval(f"document.querySelector('{display}').textContent") == "42", "earlier windows are unaffected")
+
+    print("Hand: one activation per pinch, carrying the right window id")
+    # App actions are reported to the shell through console.debug('SurfaceOS app action', action).
+    browser.eval("""window.__actions = []; (() => { const original = console.debug;
+        console.debug = (...args) => { if (args[0] === 'SurfaceOS app action') window.__actions.push(args[1]); original(...args); }; })()""")
+    key = '[data-surfaceos-window="window-1"] [data-widget-id="key-9"]'
+    kx, ky = to_canvas(browser.center(key))
+    hand.move(kx, ky)
+    hand.send(POINTER_DOWN)
+    for dx in (0.002, -0.002, 0.001, 0.0, 0.002):   # held pinch drifting a little over the button
+        hand.send(POINTER_MOVE, kx + dx, ky)
+    hand.send(POINTER_UP, kx, ky)
+    time.sleep(0.2)
+    actions = browser.eval("window.__actions")
+    check([(a["window_id"], a["widget_id"]) for a in actions] == [("window-1", "key-9")],
+          "press, movement while held, and release activate the window-1 button exactly once")
+    hand.pinch(*to_canvas(browser.center(other)))
+    time.sleep(0.2)
+    actions = browser.eval("window.__actions")
+    check([(a["window_id"], a["widget_id"]) for a in actions][-1] == ("window-3", "tab-stopwatch"),
+          "a pinch on the window-3 button reports window-3")
+
+    print("Hand: two quick pinches on a window button are two presses, not window creation")
+    one = '[data-surfaceos-window="window-1"] [data-widget-id="key-1"]'
+    ox, oy = to_canvas(browser.center(one))
+    hand.pinch(ox, oy)
+    hand.send(DOUBLE_PINCH)                  # the tracker reports the quick second pinch as a double pinch
+    hand.send(POINTER_DOWN)
+    hand.send(POINTER_UP)
+    time.sleep(0.2)
+    check(browser.eval(f"{state}.mode") == "idle", "a double pinch over a window does not arm window creation")
+    check(browser.eval(f"document.querySelector('{display}').textContent") == "911", "both pinches pressed the button")
+
+    print("Mouse and hand: move and resize still work")
+    bounds = f"{state}.windows.find(w => w.id === 'window-2')"
+    before = browser.eval(bounds)
+    hx, hy = browser.center('[data-window-id="window-2"] .window-header')
+    browser.drag((hx - 60, hy), (hx - 60 - 80, hy + 40))
+    after = browser.eval(bounds)
+    check(abs(after["x"] - (before["x"] - 80 / WIDTH)) < 0.003 and abs(after["y"] - (before["y"] + 40 / HEIGHT)) < 0.003,
+          "mouse drag on the title bar moves the window")
+    rx, ry = browser.center('[data-window-id="window-2"] .resize-handle')
+    browser.drag((rx, ry), (rx - 100, ry - 50))
+    resized = browser.eval(bounds)
+    check(abs(resized["width"] - (after["width"] - 100 / WIDTH)) < 0.003 and abs(resized["height"] - (after["height"] - 50 / HEIGHT)) < 0.003,
+          "mouse drag on the corner resizes the window")
+    hx, hy = to_canvas(browser.center('[data-window-id="window-2"] .window-header'))
+    hand.move(hx - 0.03, hy)
+    hand.send(POINTER_DOWN)
+    hand.move(hx - 0.03 + 0.05, hy + 0.02, steps=6)
+    hand.send(POINTER_UP)
+    moved = browser.eval(bounds)
+    check(abs(moved["x"] - (resized["x"] + 0.05)) < 0.003 and abs(moved["y"] - (resized["y"] + 0.02)) < 0.003,
+          "hand pinch-drag on the title bar moves the window")
+    check(browser.eval(f"{state}.mode") == "idle", "shell is idle after the drags")
+
+    print("Hand debug bubbles")
+    hand.hands([(0, 0.30, 0.40, False, True), (1, 0.70, 0.60, True, False)])
+    bubbles = "[...document.querySelectorAll('.hand-bubble:not([hidden])')]"
+    check(browser.wait_for(f"{bubbles}.length === 2", timeout=2, label="two bubbles"), "one bubble per tracked hand")
+    check(browser.eval(f"new Set({bubbles}.map(b => b.dataset.color)).size") == 2, "bubbles look different per hand")
+    check(browser.eval(f"{bubbles}.map(b => b.classList.contains('pinching')).join()") == "false,true", "pinching hand's bubble changes")
+    check(browser.eval("getComputedStyle(document.querySelector('.hand-bubble')).pointerEvents") == "none", "bubbles cannot block clicks")
+    placed = browser.eval(f"""{bubbles}.map(b => {{ const r = b.getBoundingClientRect(), s = document.querySelector('#stage').getBoundingClientRect();
+        return [(r.left + r.width / 2 - s.left) / s.width, (r.top + r.height / 2 - s.top) / s.height]; }})""")
+    check(all(abs(a - b) < 0.002 for got, want in zip(placed, [(0.30, 0.40), (0.70, 0.60)]) for a, b in zip(got, want)),
+          "bubbles sit at the canvas position used for hit testing")
+    hand.hands([(0, 0.30, 0.40, False, True)])
+    check(browser.wait_for(f"{bubbles}.length === 1", timeout=2, label="one bubble"), "a lost hand's bubble hides")
+    hand.hands([])
+    check(browser.wait_for(f"{bubbles}.length === 0", timeout=2, label="no bubbles"), "all bubbles hide when no hands are tracked")
 
 
 def main() -> int:

@@ -1,6 +1,6 @@
 {
   "camera": {
-    "index": 1,
+    "index": 0,
     "width": null,
     "height": null
   },
@@ -24,13 +24,14 @@
     "smoothing": 0.5
   },
   "surface": {
-    "mirror_x": false
+    "mirror_x": true
   },
   "server": {
     "host": "localhost",
     "port": 8765
   },
   "debug": {
-    "show_preview": true
+    "show_preview": true,
+    "hand_bubbles": true
   }
 }
