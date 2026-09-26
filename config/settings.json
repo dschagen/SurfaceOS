@@ -1,6 +1,6 @@
 {
   "camera": {
-    "index": 1,
+    "index": 0,
     "width": null,
     "height": null
   },
@@ -31,7 +31,7 @@
     "smoothing": 0.5
   },
   "surface": {
-    "mirror_x": false
+    "mirror_x": true
   },
   "server": {
     "host": "localhost",

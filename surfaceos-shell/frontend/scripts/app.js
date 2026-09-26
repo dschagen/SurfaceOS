@@ -112,33 +112,51 @@ function renderContent(w, host) {
   fallback.append(symbol, title, hint, openNotes); host.append(fallback);
 }
 
+// Frames whose window still shows the same content are kept in place rather than rebuilt:
+// detaching a frame would reload any embedded player and drop focus. Stacking uses z-index,
+// so existing frames never need to move in the DOM.
 function render() {
-  windowsLayer.replaceChildren();
   welcome.hidden = windows.length > 0 || mode === 'drawing';
+  const previous = new Map([...windowsLayer.children].map(frame => [frame.dataset.windowId, frame]));
   for (const [index, w] of windows.entries()) {
-    const frame = document.createElement('section');
-    frame.className = `surface-window${w.id === activeId ? ' active' : ''}`;
-    frame.dataset.windowId = w.id;
+    const contentKey = `${w.content}|${widgetRenderer ? 'widgets' : 'fallback'}`;
+    let frame = previous.get(w.id);
+    previous.delete(w.id);
+    if (frame?.dataset.contentKey !== contentKey) {
+      const replacement = buildFrame(w, contentKey);
+      if (frame) frame.replaceWith(replacement); else windowsLayer.append(replacement);
+      frame = replacement;
+    }
+    frame.classList.toggle('active', w.id === activeId);
     frame.style.zIndex = String(index + 1);
-    frame.setAttribute('aria-label', `${w.content} window`);
     setRect(frame, w);
-    const header = document.createElement('div'); header.className = 'window-header';
-    const info = contentInfo(w.content);
-    const symbol = document.createElement('span'); symbol.className = 'window-symbol'; symbol.textContent = info.symbol;
-    const title = document.createElement('span'); title.className = 'window-title'; title.textContent = `${info.title} · ${w.id}`;
-    const close = document.createElement('button'); close.className = 'window-close'; close.type = 'button'; close.title = 'Close window'; close.setAttribute('aria-label', `Close ${w.id}`); close.textContent = '×';
-    close.addEventListener('click', () => {
-      windows = windows.filter(item => item.id !== w.id);
-      activeId = windows.at(-1)?.id ?? null;
-      render(); setStatus('Window closed');
-    });
-    header.append(symbol, title, close);
-    const host = document.createElement('div'); host.className = 'widget-host'; renderContent(w, host);
-    const resize = document.createElement('div'); resize.className = 'resize-handle'; resize.setAttribute('aria-label', 'Resize window');
-    frame.append(header, host, resize); windowsLayer.append(frame);
   }
+  for (const frame of previous.values()) frame.remove();
   // Lets the widget renderer release content for windows that closed or changed content.
   widgetRenderer?.sync?.(windows.map(({ id, content }) => ({ id, content })));
+}
+
+function buildFrame(w, contentKey) {
+  const frame = document.createElement('section');
+  frame.className = 'surface-window';
+  frame.dataset.windowId = w.id;
+  frame.dataset.contentKey = contentKey;
+  frame.setAttribute('aria-label', `${w.content} window`);
+  const header = document.createElement('div'); header.className = 'window-header';
+  const info = contentInfo(w.content);
+  const symbol = document.createElement('span'); symbol.className = 'window-symbol'; symbol.textContent = info.symbol;
+  const title = document.createElement('span'); title.className = 'window-title'; title.textContent = `${info.title} · ${w.id}`;
+  const close = document.createElement('button'); close.className = 'window-close'; close.type = 'button'; close.title = 'Close window'; close.setAttribute('aria-label', `Close ${w.id}`); close.textContent = '×';
+  close.addEventListener('click', () => {
+    windows = windows.filter(item => item.id !== w.id);
+    activeId = windows.at(-1)?.id ?? null;
+    render(); setStatus('Window closed');
+  });
+  header.append(symbol, title, close);
+  const host = document.createElement('div'); host.className = 'widget-host'; renderContent(w, host);
+  const resize = document.createElement('div'); resize.className = 'resize-handle'; resize.setAttribute('aria-label', 'Resize window');
+  frame.append(header, host, resize);
+  return frame;
 }
 
 function armCreation() {

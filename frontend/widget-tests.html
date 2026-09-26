@@ -235,6 +235,46 @@
     assertEqual(box.querySelectorAll(".surfaceos-widget-warnings li").length, 1, "warning");
   });
 
+  test("text inputs report edits and Enter without re-renders overwriting typing", () => {
+    const layout = (value) => ({ version: 1, window_id: "w", widgets: [
+      { id: "field", type: "input", x: 0, y: 0, width: 1, height: 0.3, value, placeholder: "<b>hint</b>" },
+    ] });
+    const { box, renderer, actions } = setup(layout(""));
+    const field = box.querySelector('[data-widget-id="field"]');
+    assertEqual([field.tagName, field.placeholder], ["INPUT", "<b>hint</b>"], "native text field, placeholder as text");
+    field.value = "abc";
+    field.dispatchEvent(new Event("input"));
+    field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+    assertEqual(actions.map((a) => [a.window_id, a.widget_id, a.event, a.value]),
+      [["w", "field", "change", "abc"], ["w", "field", "submit", "abc"]]);
+    renderer.renderLayout(layout(""));
+    assertEqual(field.value, "abc", "unchanged layout value keeps what was typed");
+    renderer.renderLayout(layout("new"));
+    assertEqual(field.value, "new", "a changed layout value replaces the text");
+    assertEqual(renderer.handlePointer(p("pointer_down", 0.5, 0.1)), false, "inputs are not pointer buttons");
+  });
+
+  test("embed content is never moved when other widgets come and go", () => {
+    const embed = { id: "e", type: "embed", x: 0, y: 0.2, width: 1, height: 0.8 };
+    const { box, renderer } = setup({ version: 1, window_id: "w", widgets: [embed] });
+    const element = renderer.getElement("e");
+    const frame = document.createElement("iframe");
+    element.append(frame);
+    const removed = [];
+    const observer = new MutationObserver((records) => records.forEach((r) => removed.push(...r.removedNodes)));
+    observer.observe(box, { childList: true, subtree: true });
+    renderer.renderLayout({ version: 1, window_id: "w", widgets: [
+      { id: "before", type: "text", x: 0, y: 0, width: 1, height: 0.2, text: "a" }, embed,
+      { id: "over", type: "button", x: 0.4, y: 0.4, width: 0.2, height: 0.2, text: "b" },
+    ] });
+    renderer.renderLayout({ version: 1, window_id: "w", widgets: [embed] });
+    observer.takeRecords().forEach((r) => removed.push(...r.removedNodes));
+    observer.disconnect();
+    assertEqual(removed.includes(element) || removed.includes(frame), false, "embed and its iframe stayed attached");
+    assertEqual(element.firstChild === frame, true, "app content inside the embed untouched");
+    assertEqual(element.className.includes("surfaceos-widget--embed"), true);
+  });
+
   test("canvas and video widgets are exposed through getElement", () => {
     const { renderer } = setup({ version: 1, window_id: "w", widgets: [
       { id: "c", type: "canvas", x: 0, y: 0, width: 0.5, height: 1 },

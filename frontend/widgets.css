@@ -33,6 +33,7 @@
 .surfaceos-app-chess { --sw-accent: #e6b877; }
 .surfaceos-app-music { --sw-accent: #ff6fb1; }
 .surfaceos-app-weather { --sw-accent: #62b6ff; }
+.surfaceos-app-youtube { --sw-accent: #ff4e45; }
 
 /* ---------- Base widgets ---------- */
 
@@ -59,6 +60,16 @@
 
 .surfaceos-widgets .surfaceos-widget--canvas { padding: 0; display: block; border-radius: 0.7em; background: #080c18; }
 .surfaceos-widgets .surfaceos-widget--video { padding: 0; object-fit: contain; background: #000; border-radius: 0.6em; }
+.surfaceos-widgets .surfaceos-widget--embed { padding: 0; display: block; background: #000; border-radius: 0.6em; }
+/* Embedded pages never take pointer input; the window's own widgets handle mouse and hand alike. */
+.surfaceos-widgets .surfaceos-widget--embed iframe { display: block; width: 100%; height: 100%; border: 0; pointer-events: none; }
+.surfaceos-widgets .surfaceos-widget--input {
+  justify-content: flex-start; text-align: left; padding: 0 0.8em;
+  color: var(--sw-text); background: rgba(0, 0, 0, 0.3); border: 1px solid var(--sw-border); border-radius: 0.6em;
+  font-size: clamp(11px, 3.4cqmin, 26px); outline: none; user-select: text;
+}
+.surfaceos-widgets .surfaceos-widget--input::placeholder { color: var(--sw-faint); }
+.surfaceos-widgets .surfaceos-widget--input:focus { border-color: color-mix(in srgb, var(--sw-accent) 70%, transparent); box-shadow: 0 0 0 0.12em color-mix(in srgb, var(--sw-accent) 30%, transparent); }
 
 /* Hand input has no hover cue of its own, so hover and press are drawn from renderer state. */
 .surfaceos-widgets .surfaceos-widget--hover {
@@ -191,6 +202,14 @@
 }
 .surfaceos-widgets .surfaceos-v-art .surfaceos-icon { width: 55%; height: 55%; stroke-width: 1.6; opacity: 0.85; }
 
+/* ---------- YouTube ---------- */
+
+/* Transparent tap target over the video: a pinch or click there toggles playback. */
+.surfaceos-widgets .surfaceos-v-video-hit { background: transparent; border: 2px solid transparent; box-shadow: none; }
+.surfaceos-widgets .surfaceos-v-video-hit.surfaceos-widget--hover { background: transparent; border-color: color-mix(in srgb, var(--sw-accent) 55%, transparent); box-shadow: none; }
+.surfaceos-widgets .surfaceos-v-video-hit.surfaceos-widget--pressed { background: rgba(255, 255, 255, 0.08); border-color: var(--sw-accent); transform: none; }
+.surfaceos-widgets .surfaceos-v-overlay { background: rgba(8, 10, 18, 0.88); border-radius: 0.6em; white-space: pre-wrap; padding: 0 1.2em; }
+
 /* ---------- Weather ---------- */
 
 .surfaceos-widgets .surfaceos-v-glyph .surfaceos-icon { width: 80%; height: 80%; max-width: 3.5em; max-height: 3.5em; color: var(--sw-accent); stroke-width: 1.7; }
@@ -231,7 +250,7 @@
 /* ---------- Developer warnings ---------- */
 
 .surfaceos-widgets .surfaceos-widget-warnings {
-  position: absolute; left: 6px; right: 6px; bottom: 6px; margin: 0; padding: 6px 10px 6px 24px; z-index: 1;
+  position: absolute; left: 6px; right: 6px; bottom: 6px; margin: 0; padding: 6px 10px 6px 24px; z-index: 10000;
   border: 1px dashed #ff8a7a; border-radius: 8px; background: rgba(17, 22, 37, 0.92); color: #ff8a7a;
   font: 12px/1.4 system-ui, sans-serif; pointer-events: none;
 }

@@ -55,7 +55,8 @@ export function createShellAdapter() {
       return { version: 1, type, x: (e.clientX - box.left) / box.width, y: (e.clientY - box.top) / box.height, source: 'mouse' };
     };
     root.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0) return;
+      // Text fields keep native mouse behavior (focus, caret, selection, paste menu).
+      if (e.button !== 0 || e.target.closest('input, textarea')) return;
       pressed = true;
       root.setPointerCapture(e.pointerId);
       deliver(id, local('pointer_down', e));
