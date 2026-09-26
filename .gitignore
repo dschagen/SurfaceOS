@@ -4,3 +4,5 @@ __pycache__/
 snips/
 models/*.task
 .vscode/
+CLAUDE.md
+AGENTS.md
