@@ -17,12 +17,14 @@ Open `http://localhost:8000/surfaceos-shell/frontend/?hand=off` for a mouse-only
 ## Mouse walkthrough
 
 1. On every load, drag the four numbered points to the physical boundary of Surface 1. Confirm. Choose **Add another surface** and repeat if a second area fits within the projector beam. Calibrated areas may not overlap in the projector frame.
-2. Choose **Enter workspace**, then **Continue with mouse**. The hand-alignment route instead asks you to pinch four projected targets per surface with the tracker. A plain mouse cannot supply camera-space samples.
+2. Choose **Enter workspace**, then **Continue with mouse**. For hand alignment, point your index fingertip at each of four projected targets and hold still for 3 seconds without pinching. The progress ring fills during each hold; move to the next target when the number changes. Moving too far or losing tracking restarts the hold. After four points, point at the center **C** without pinching; use the laptop controls to accept or retry that surface. Repeat for each surface. A plain mouse cannot supply camera-space samples.
 3. Choose **New Window**, then drag in a clear area inside one surface. Scroll the program list with the wheel and click **Pinch to confirm** to run the centered app.
 4. Choose **Move / Resize**; confirm, pick an operation, confirm it, then click the target window. Drag the window or one of the four resize corners. With multiple surfaces, Move asks whether to select a numbered destination.
 5. Choose **Close**, confirm, then click the target window. The **Actions** button and the three-action menu let you create another window.
 
 The tracker sends `two_hand_single_pinch` to request the main actions, `two_hand_double_pinch` for Move/Resize, and `thumbs_down` for Close. Gesture prompts ask for Yes/No. `two_hand_pinch_start/move/end` draws a new rectangle after an action is selected. Ordinary pointing, one-hand pinch selection, and scrolling do not ask for approval. Coordinates from the current Python tracker are camera-normalized; the optional four-target alignment maps those points to the projector before dispatching them to the shell.
+
+The workspace shows one calibrated pointer. Raw per-hand tracking bubbles are off by default; add `?bubbles=on` to the URL for input debugging (or `&bubbles=on` when another query option is present). Those raw bubbles are camera positions and will not line up with a calibrated surface.
 
 ## Capture and AI paths
 

@@ -145,8 +145,16 @@ class Hand:
 
     def pinch(self, x: float, y: float) -> None:
         self.move(x, y)
+        for _ in range(9):
+            self.send(POINTER_MOVE, x, y)
         self.send(POINTER_DOWN)
         self.send(POINTER_UP)
+
+    def dwell(self, x: float, y: float) -> None:
+        self.move(x, y)
+        deadline = time.monotonic() + 3.3
+        while time.monotonic() < deadline:
+            self.send(POINTER_MOVE, x, y)
 
     def rectangle(self, event_type: str, x: float, y: float, width: float, height: float) -> None:
         self.server.publish(encode(SurfaceInputEvent(event_type, None, x, y, width, height)))
@@ -177,7 +185,9 @@ def run(browser: Browser, hand: Hand, base_url: str, hand_url: str) -> None:
     browser.click(*browser.center("#finish-setup"))
     browser.click(*browser.center("#dialog button:first-child"))
     for x, y in ((.2, .3), (.8, .3), (.8, .75), (.2, .75)):
-        hand.pinch(x, y)
+        hand.dwell(x, y)
+    check(browser.wait_for(f"{state}.phase === 'camera-check'", label="center check"), "center check follows four steady holds")
+    browser.click(*browser.center("#accept-alignment"))
     check(browser.wait_for(f"{state}.phase === 'workspace'", label="hand alignment"), "four hand targets align input")
     check(browser.eval(f"{state}.windows.length") == 0, "no windows restored")
 

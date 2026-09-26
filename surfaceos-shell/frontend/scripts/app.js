@@ -1,4 +1,5 @@
 import {clamp, rectBetween, validRect, homography, project, unproject, cssMatrix, quadValid, polygonsOverlap} from './geometry.js';
+import {createDwellTracker} from './dwell.js';
 
 const $ = id => document.getElementById(id);
 const stage=$('stage'), surfacesLayer=$('surfaces'), setup=$('setup'), calibration=$('calibration');
@@ -43,12 +44,18 @@ function setupPreview(){
       handle.textContent=String(i+1);handle.title=`Corner ${i+1}: drag onto the physical surface`;
       calibration.append(handle);
     });
-  }else if(phase==='camera'){
+  }else if(phase==='camera'||phase==='camera-check'){
     calibration.hidden=false;
     const s=surfaces[cameraStep.surface];
     const points=[[inset,inset],[1-inset,inset],[1-inset,1-inset],[inset,1-inset]];
-    const p=project(s.h,...points[cameraStep.corner]);
-    const marker=document.createElement('div');marker.className='camera-target';marker.style.left=`${p.x*100}%`;marker.style.top=`${p.y*100}%`;marker.textContent=String(cameraStep.corner+1);
+    const check=phase==='camera-check';
+    const p=project(s.h,...(check?[.5,.5]:points[cameraStep.corner]));
+    if(!check){
+      const ring=document.createElement('div');ring.className='dwell-ring';ring.id='dwell-ring';
+      ring.style.left=`${p.x*100}%`;ring.style.top=`${p.y*100}%`;
+      calibration.append(ring);
+    }
+    const marker=document.createElement('div');marker.className='camera-target';marker.style.left=`${p.x*100}%`;marker.style.top=`${p.y*100}%`;marker.textContent=check?'C':String(cameraStep.corner+1);
     calibration.append(marker);
   }else calibration.hidden=true;
 }
@@ -58,6 +65,7 @@ function showCalibration(){
   setup.querySelector('h1').firstChild.textContent='Define surface ';
   setup.querySelector('p:not(.eyebrow)').textContent='Drag each corner onto the usable boundary of this physical surface. Keep all four corners on one flat plane.';
   $('confirm-surface').hidden=false;$('add-surface').hidden=true;$('finish-setup').hidden=true;
+  $('accept-alignment').hidden=true;$('retry-alignment').hidden=true;
   setSetupMessage('Move the four points, then confirm.');status(`Calibrate surface ${surfaces.length+1}`);
   setupPreview();render();
 }
@@ -73,18 +81,19 @@ function confirmSurface(){
   setSetupMessage('Projector geometry is mapped. Camera input alignment comes next.');
 }
 function startCameraAlignment(){
-  phase='camera';cameraStep={surface:0,corner:0,samples:[]};
+  phase='camera';cameraStep={surface:0,corner:0,samples:[],tracker:createDwellTracker(),pinching:false};
   setup.hidden=false;actions.hidden=true;setup.querySelector('h1').firstChild.textContent='Align hand input · surface ';
   $('surface-number').textContent='1';
-  setup.querySelector('p:not(.eyebrow)').textContent='Place your index fingertip on the projected numbered target and pinch once. Repeat four times per surface.';
+  setup.querySelector('p:not(.eyebrow)').textContent='Point your index fingertip at each projected target and hold still for 3 seconds. Do not pinch.';
   $('confirm-surface').hidden=true;$('add-surface').hidden=true;$('finish-setup').hidden=false;
+  $('accept-alignment').hidden=true;$('retry-alignment').hidden=true;
   $('finish-setup').textContent='Skip hand alignment';
   setSetupMessage('Hand tracker required. Mouse testing can skip this step.');setupPreview();
-  status('Pinch on target 1');
+  status('Hold at target 1 for 3 seconds');
 }
 function finishSetup(){
   if(phase==='choice'){
-    prompt('Align hand input?','This maps camera points to the projected surfaces. Use the tracker and pinch four targets per surface, or continue with a mouse.',[
+    prompt('Align hand input?','This maps camera points to the projected surfaces. Hold your finger still at each target for 3 seconds, or continue with a mouse.',[
       ['Align hands',startCameraAlignment],['Continue with mouse',enterWorkspace]]);
   }else enterWorkspace();
 }
@@ -110,9 +119,21 @@ function getMappedHandPoint(raw){
   }
   return best;
 }
-function recordCameraPoint(event){
-  if(event.source!=='hand') {setSetupMessage('Use a hand pinch from the tracker for this alignment, or skip for mouse testing.');return;}
-  cameraStep.samples.push([event.x,event.y]);cameraStep.corner++;
+function updateCameraDwell(event){
+  const result=cameraStep.tracker.update(event,performance.now());
+  const ring=$('dwell-ring');
+  if(ring)ring.style.setProperty('--progress',`${result.progress*100}%`);
+  if(result.phase==='move'){
+    setSetupMessage(`Move your finger to target ${cameraStep.corner+1}, then hold still.`);
+    return;
+  }
+  if(result.phase==='holding'){
+    const remaining=Math.max(0,Math.ceil(3*(1-result.progress)));
+    setSetupMessage(`Target ${cameraStep.corner+1}: hold still · ${remaining} seconds left. No pinch needed.`);
+    return;
+  }
+  if(result.phase!=='complete')return;
+  cameraStep.samples.push(result.sample);cameraStep.corner++;
   if(cameraStep.corner===4){
     try {
       const samples=cameraStep.samples;
@@ -120,14 +141,31 @@ function recordCameraPoint(event){
       if(Math.abs(signed)<.01)throw new Error('Points are too close together');
       surfaces[cameraStep.surface].camera=homography(samples);
     }catch{
-      cameraStep.samples=[];cameraStep.corner=0;setSetupMessage('Those four camera points are invalid. Try this surface again.');setupPreview();return;
+      cameraStep.samples=[];cameraStep.corner=0;cameraStep.tracker=createDwellTracker();setSetupMessage('Those four camera points are invalid. Try this surface again.');setupPreview();return;
     }
-    cameraStep.surface++;cameraStep.corner=0;cameraStep.samples=[];
-    if(cameraStep.surface===surfaces.length){enterWorkspace();status('Hand alignment complete');return;}
-    $('surface-number').textContent=String(cameraStep.surface+1);
+    phase='camera-check';
+    setup.querySelector('p:not(.eyebrow)').textContent='Point at the center C without pinching. The small cursor should follow your fingertip and line up with C.';
+    $('finish-setup').hidden=true;$('accept-alignment').hidden=false;$('retry-alignment').hidden=false;
+    setSetupMessage('Use the laptop controls to accept or retry this surface.');status('Check cursor alignment at C');setupPreview();return;
   }
-  setSetupMessage(`Surface ${cameraStep.surface+1}: pinch on target ${cameraStep.corner+1}.`);
-  status(`Pinch on target ${cameraStep.corner+1}`);setupPreview();
+  setSetupMessage(`Target ${cameraStep.corner} recorded. Move to target ${cameraStep.corner+1} and hold for 3 seconds.`);
+  status(`Hold at target ${cameraStep.corner+1} for 3 seconds`);setupPreview();
+}
+function retryCameraAlignment(){
+  surfaces[cameraStep.surface].camera=null;
+  cameraStep.corner=0;cameraStep.samples=[];cameraStep.tracker=createDwellTracker();cameraStep.pinching=false;phase='camera';
+  setup.querySelector('p:not(.eyebrow)').textContent='Point your index fingertip at each projected target and hold still for 3 seconds. Do not pinch.';
+  $('finish-setup').hidden=false;$('accept-alignment').hidden=true;$('retry-alignment').hidden=true;
+  cursor.hidden=true;setSetupMessage('Try the four targets again.');status('Hold at target 1 for 3 seconds');setupPreview();
+}
+function acceptCameraAlignment(){
+  cameraStep.surface++;
+  if(cameraStep.surface===surfaces.length){cursor.hidden=true;enterWorkspace();status('Hand alignment complete');return;}
+  cameraStep.corner=0;cameraStep.samples=[];cameraStep.tracker=createDwellTracker();cameraStep.pinching=false;phase='camera';
+  $('surface-number').textContent=String(cameraStep.surface+1);
+  setup.querySelector('p:not(.eyebrow)').textContent='Point your index fingertip at each projected target and hold still for 3 seconds. Do not pinch.';
+  $('finish-setup').hidden=false;$('accept-alignment').hidden=true;$('retry-alignment').hidden=true;
+  cursor.hidden=true;setSetupMessage('Move to target 1 and hold for 3 seconds.');status('Hold at target 1 for 3 seconds');setupPreview();
 }
 function pointForEvent(e){
   if(e.source!=='hand')return e;
@@ -285,7 +323,23 @@ function deliverContent(w,e){const s=surfaceById(w.surface_id),p=local(s,e);if(!
 function handleInput(raw,target=null){
   if(raw?.version!==1||typeof raw.type!=='string')return false;
   if(phase==='camera'){
-    if(raw.type==='pointer_down'&&Number.isFinite(raw.x)&&Number.isFinite(raw.y))recordCameraPoint(raw);
+    if(raw.source==='hand'&&raw.type==='pointer_move'&&!cameraStep.pinching)updateCameraDwell(raw);
+    if(raw.source==='hand'&&(raw.type==='pointer_down'||raw.type==='pointer_cancel')){
+      cameraStep.pinching=raw.type==='pointer_down';
+      cameraStep.tracker.cancel();const ring=$('dwell-ring');if(ring)ring.style.setProperty('--progress','0%');
+      setSetupMessage(raw.type==='pointer_down'?'Release your pinch, then point and hold still for 3 seconds.':'Hand lost. Point at the target again and hold for 3 seconds.');
+    }
+    if(raw.source==='hand'&&raw.type==='pointer_up')cameraStep.pinching=false;
+    return true;
+  }
+  if(phase==='camera-check'){
+    if(raw.type==='pointer_cancel'){cursor.hidden=true;return true;}
+    if(raw.type==='pointer_move'&&raw.source==='hand'){
+      const s=surfaces[cameraStep.surface],q=unproject(s.camera,raw.x,raw.y);
+      if(q){const p=project(s.h,inset+(1-2*inset)*q.x,inset+(1-2*inset)*q.y);
+        cursor.hidden=false;cursor.style.left=`${p.x*100}%`;cursor.style.top=`${p.y*100}%`;
+      }
+    }
     return true;
   }
   if(phase!=='workspace')return false;
@@ -456,6 +510,8 @@ function startVoice(id){
   try{recognition.start();if(w){w.message='Listening…';render();}}catch(error){if(w){w.message=`Microphone unavailable: ${error.message}`;render();}}
 }
 $('confirm-surface').addEventListener('click',confirmSurface);
+$('accept-alignment').addEventListener('click',acceptCameraAlignment);
+$('retry-alignment').addEventListener('click',retryCameraAlignment);
 $('add-surface').addEventListener('click',addSurface);
 $('finish-setup').addEventListener('click',finishSetup);
 actions.addEventListener('click',e=>{const button=e.target.closest('[data-action]');if(button)chooseAction(button.dataset.action);});

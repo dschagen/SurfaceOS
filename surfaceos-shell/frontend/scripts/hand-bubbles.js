@@ -1,6 +1,5 @@
-// Temporary testing aid: one bubble per tracked hand at the canvas position the shell hit-tests.
-// The tracker only sends these snapshots when "debug.hand_bubbles" is true in config/settings.json,
-// so turning that off removes the bubbles for the demo. ?bubbles=off hides them in this browser only.
+// Optional raw camera debugging overlay. The projected cursor is calibrated separately.
+// Enable with ?bubbles=on only while diagnosing hand tracking.
 // Bubbles sit above the UI and never take pointer events.
 
 const COLORS = ['cyan', 'amber', 'pink', 'lime'];
@@ -54,6 +53,6 @@ function update(hands) {
   if (seen.size) staleTimer = setTimeout(hideAll, STALE_MS);
 }
 
-if (new URLSearchParams(location.search).get('bubbles') !== 'off') {
+if (new URLSearchParams(location.search).get('bubbles') === 'on') {
   window.addEventListener('surfaceos:hand-debug', (e) => update(Array.isArray(e.detail) ? e.detail : []));
 }
