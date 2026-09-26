@@ -17,7 +17,56 @@
 
 <script type="module">
   import { createWidgetRenderer } from "./widget-renderer.js";
-  import { workspaceLayout, notesLayout, brokenLayout } from "./widget-fixtures.js";
+
+  // Fixture layouts in window-local coordinates.
+  function workspaceLayout(windowId, pressCount = 0) {
+    return {
+      version: 1,
+      window_id: windowId,
+      widgets: [
+        { id: "title", type: "text", x: 0.05, y: 0.03, width: 0.9, height: 0.16, text: "Workspace" },
+        { id: "capture", type: "button", x: 0.08, y: 0.24, width: 0.4, height: 0.22, text: "Capture area" },
+        { id: "ask", type: "button", x: 0.52, y: 0.24, width: 0.4, height: 0.22, text: "Ask AI" },
+        { id: "counter", type: "button", x: 0.08, y: 0.56, width: 0.84, height: 0.22, text: "Press me" },
+        {
+          id: "count",
+          type: "text",
+          x: 0.05,
+          y: 0.82,
+          width: 0.9,
+          height: 0.14,
+          text: `Pressed ${pressCount} ${pressCount === 1 ? "time" : "times"}`,
+        },
+      ],
+    };
+  }
+
+  function notesLayout(windowId) {
+    return {
+      version: 1,
+      window_id: windowId,
+      widgets: [
+        { id: "note", type: "text", x: 0.05, y: 0.06, width: 0.9, height: 0.56, text: "A second layout" },
+        { id: "prev", type: "button", x: 0.08, y: 0.7, width: 0.38, height: 0.22, text: "Back" },
+        { id: "next", type: "button", x: 0.54, y: 0.7, width: 0.38, height: 0.22, text: "Next" },
+      ],
+    };
+  }
+
+  function brokenLayout(windowId) {
+    return {
+      version: 1,
+      window_id: windowId,
+      widgets: [
+        { id: "ok", type: "button", x: 0.1, y: 0.1, width: 0.8, height: 0.25, text: "Still works" },
+        { id: "slider", type: "slider", x: 0.1, y: 0.4, width: 0.8, height: 0.1 },
+        { id: "ok", type: "text", x: 0.1, y: 0.55, width: 0.8, height: 0.1, text: "duplicate id" },
+        { id: "huge", type: "button", x: 0.5, y: 0.5, width: 0.9, height: 0.2, text: "outside" },
+        { type: "text", x: 0, y: 0, width: 0.1, height: 0.1, text: "no id" },
+        { id: "html", type: "text", x: 0.1, y: 0.8, width: 0.8, height: 0.15, text: "<b>shown as text, not bold</b>" },
+      ],
+    };
+  }
 
   const results = document.getElementById("results");
   let failures = 0;

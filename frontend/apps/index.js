@@ -12,5 +12,3 @@ import music from './music.js';
 import weather from './weather.js';
 
 export const APPS = { calculator, browser, todo, notepad, calendar, timer, pong, chess, music, weather };
-
-export const APP_TYPES = Object.keys(APPS);

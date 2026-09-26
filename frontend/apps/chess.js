@@ -40,7 +40,7 @@ export function newGame() {
   return fromFEN(START_FEN);
 }
 
-export function isAttacked(board, sq, by) {
+function isAttacked(board, sq, by) {
   const row = rowOf(sq);
   const col = colOf(sq);
   // A white pawn attacks upward (toward row 0), so it sits one row below the target.
@@ -78,7 +78,7 @@ export function isAttacked(board, sq, by) {
   return false;
 }
 
-export function inCheck(state, color = state.turn) {
+function inCheck(state, color = state.turn) {
   const king = state.board.indexOf(color === 'w' ? 'K' : 'k');
   return king >= 0 && isAttacked(state.board, king, color === 'w' ? 'b' : 'w');
 }

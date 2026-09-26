@@ -21,7 +21,7 @@ export function describeWeather(code) {
   return 'Unknown';
 }
 
-export function forecastUrl({ latitude, longitude }) {
+function forecastUrl({ latitude, longitude }) {
   const params = new URLSearchParams({
     latitude: String(latitude),
     longitude: String(longitude),

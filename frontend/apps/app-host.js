@@ -8,7 +8,7 @@ import { createWidgetRenderer } from '../widget-renderer.js';
 import { createBrowserDictation } from './dictation.js';
 import { APPS } from './index.js';
 
-export const DEFAULT_SERVICES = {
+const DEFAULT_SERVICES = {
   mediaBridgeUrl: 'http://127.0.0.1:8766',
   // Florida International University, the ShellHacks venue.
   weather: { name: 'Miami, FL', latitude: 25.7574, longitude: -80.3733 },

@@ -3,7 +3,6 @@
 From the repository root, run `python -m http.server 8000 --directory frontend`, then open:
 
 - `http://localhost:8000/apps-demo.html`: every app in a stand-in shell with mouse, keyboard, and hand input. `?open=calculator,chess` picks the starting apps (up to four); `?hand=0` skips the hand tracker connection.
-- `http://localhost:8000/widget-demo.html`: the bare renderer with fixture layouts. `?autoplay` plays a scripted fake hand stream.
 - `http://localhost:8000/app-tests.html` and `http://localhost:8000/widget-tests.html`: browser tests; each shows `ALL TESTS PASSED` or the failures.
 
 For the music app, also run `python tools/media_bridge.py` (standard library only, Windows).
