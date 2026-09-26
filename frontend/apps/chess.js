@@ -1,372 +1,261 @@
 import { button, text, rows, columns, squareIn, grid, rect, inset } from './layout.js';
-
-// Board squares are indexed 0..63 with 0 = a8 and 63 = h1. Pieces use FEN letters:
-// uppercase for white, lowercase for black, null for empty.
-
-const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
-const FILES = 'abcdefgh';
-const KNIGHT = [[-2, -1], [-2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2], [2, -1], [2, 1]];
-const KING = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
-const ROOK_DIRS = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-const BISHOP_DIRS = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
-const VALUES = { p: 1, n: 3, b: 3.2, r: 5, q: 9, k: 0 };
-
-const colorOf = (piece) => (piece === piece.toUpperCase() ? 'w' : 'b');
-const rowOf = (sq) => sq >> 3;
-const colOf = (sq) => sq & 7;
-const at = (row, col) => (row >= 0 && row < 8 && col >= 0 && col < 8 ? row * 8 + col : -1);
-export const squareName = (sq) => `${FILES[colOf(sq)]}${8 - rowOf(sq)}`;
-export const squareIndex = (name) => at(8 - Number(name[1]), FILES.indexOf(name[0]));
-
-export function fromFEN(fen) {
-  const [placement, turn, castling, ep, halfmove, fullmove] = fen.trim().split(/\s+/);
-  const board = [];
-  for (const char of placement.replace(/\//g, '')) {
-    if (/\d/.test(char)) board.push(...Array(Number(char)).fill(null));
-    else board.push(char);
-  }
-  if (board.length !== 64) throw new Error('Bad FEN');
-  return {
-    board,
-    turn,
-    castling: castling === '-' ? '' : castling,
-    ep: ep === '-' ? -1 : squareIndex(ep),
-    halfmove: Number(halfmove) || 0,
-    fullmove: Number(fullmove) || 1,
-  };
-}
-
-export function newGame() {
-  return fromFEN(START_FEN);
-}
-
-function isAttacked(board, sq, by) {
-  const row = rowOf(sq);
-  const col = colOf(sq);
-  // A white pawn attacks upward (toward row 0), so it sits one row below the target.
-  const pawnRow = by === 'w' ? row + 1 : row - 1;
-  const pawn = by === 'w' ? 'P' : 'p';
-  for (const dc of [-1, 1]) {
-    const from = at(pawnRow, col + dc);
-    if (from >= 0 && board[from] === pawn) return true;
-  }
-  const own = (piece, letter) => piece && colorOf(piece) === by && piece.toLowerCase() === letter;
-  for (const [dr, dc] of KNIGHT) {
-    const from = at(row + dr, col + dc);
-    if (from >= 0 && own(board[from], 'n')) return true;
-  }
-  for (const [dr, dc] of KING) {
-    const from = at(row + dr, col + dc);
-    if (from >= 0 && own(board[from], 'k')) return true;
-  }
-  const rays = [[ROOK_DIRS, 'r'], [BISHOP_DIRS, 'b']];
-  for (const [dirs, slider] of rays) {
-    for (const [dr, dc] of dirs) {
-      let r = row + dr;
-      let c = col + dc;
-      while (at(r, c) >= 0) {
-        const piece = board[at(r, c)];
-        if (piece) {
-          if (own(piece, slider) || own(piece, 'q')) return true;
-          break;
-        }
-        r += dr;
-        c += dc;
-      }
-    }
-  }
-  return false;
-}
-
-function inCheck(state, color = state.turn) {
-  const king = state.board.indexOf(color === 'w' ? 'K' : 'k');
-  return king >= 0 && isAttacked(state.board, king, color === 'w' ? 'b' : 'w');
-}
-
-function pseudoMoves(state, from) {
-  const { board } = state;
-  const piece = board[from];
-  const color = colorOf(piece);
-  const enemy = color === 'w' ? 'b' : 'w';
-  const row = rowOf(from);
-  const col = colOf(from);
-  const moves = [];
-  const add = (to) => {
-    const promotes = piece.toLowerCase() === 'p' && (rowOf(to) === 0 || rowOf(to) === 7);
-    if (promotes) for (const promo of ['q', 'r', 'b', 'n']) moves.push({ from, to, promo });
-    else moves.push({ from, to });
-  };
-  const type = piece.toLowerCase();
-
-  if (type === 'p') {
-    const dir = color === 'w' ? -1 : 1;
-    const startRow = color === 'w' ? 6 : 1;
-    const one = at(row + dir, col);
-    if (one >= 0 && !board[one]) {
-      add(one);
-      const two = at(row + 2 * dir, col);
-      if (row === startRow && !board[two]) add(two);
-    }
-    for (const dc of [-1, 1]) {
-      const to = at(row + dir, col + dc);
-      if (to < 0) continue;
-      if ((board[to] && colorOf(board[to]) === enemy) || to === state.ep) add(to);
-    }
-    return moves;
-  }
-  if (type === 'n' || type === 'k') {
-    for (const [dr, dc] of type === 'n' ? KNIGHT : KING) {
-      const to = at(row + dr, col + dc);
-      if (to >= 0 && (!board[to] || colorOf(board[to]) === enemy)) add(to);
-    }
-    if (type === 'k') addCastling(state, from, color, enemy, moves);
-    return moves;
-  }
-  const dirs = type === 'r' ? ROOK_DIRS : type === 'b' ? BISHOP_DIRS : [...ROOK_DIRS, ...BISHOP_DIRS];
-  for (const [dr, dc] of dirs) {
-    let r = row + dr;
-    let c = col + dc;
-    while (at(r, c) >= 0) {
-      const to = at(r, c);
-      if (board[to]) {
-        if (colorOf(board[to]) === enemy) add(to);
-        break;
-      }
-      add(to);
-      r += dr;
-      c += dc;
-    }
-  }
-  return moves;
-}
-
-function addCastling(state, from, color, enemy, moves) {
-  const { board, castling } = state;
-  const home = color === 'w' ? 60 : 4;
-  if (from !== home || isAttacked(board, home, enemy)) return;
-  const [kingSide, queenSide, rook] = color === 'w' ? ['K', 'Q', 'R'] : ['k', 'q', 'r'];
-  if (castling.includes(kingSide) && board[home + 3] === rook && !board[home + 1] && !board[home + 2]
-      && !isAttacked(board, home + 1, enemy) && !isAttacked(board, home + 2, enemy)) {
-    moves.push({ from, to: home + 2, castle: 'king' });
-  }
-  if (castling.includes(queenSide) && board[home - 4] === rook && !board[home - 1] && !board[home - 2] && !board[home - 3]
-      && !isAttacked(board, home - 1, enemy) && !isAttacked(board, home - 2, enemy)) {
-    moves.push({ from, to: home - 2, castle: 'queen' });
-  }
-}
-
-export function applyMove(state, move) {
-  const board = state.board.slice();
-  const piece = board[move.from];
-  const color = colorOf(piece);
-  const type = piece.toLowerCase();
-  const captured = board[move.to];
-  board[move.to] = move.promo ? (color === 'w' ? move.promo.toUpperCase() : move.promo) : piece;
-  board[move.from] = null;
-
-  let enPassantCapture = false;
-  if (type === 'p' && move.to === state.ep && colOf(move.from) !== colOf(move.to)) {
-    board[at(rowOf(move.from), colOf(move.to))] = null;
-    enPassantCapture = true;
-  }
-  if (type === 'k' && Math.abs(move.to - move.from) === 2) {
-    const kingSide = move.to > move.from;
-    const rookFrom = kingSide ? move.from + 3 : move.from - 4;
-    const rookTo = kingSide ? move.from + 1 : move.from - 1;
-    board[rookTo] = board[rookFrom];
-    board[rookFrom] = null;
-  }
-
-  let { castling } = state;
-  const strip = (letters) => { castling = [...castling].filter((c) => !letters.includes(c)).join(''); };
-  if (piece === 'K') strip('KQ');
-  if (piece === 'k') strip('kq');
-  const cornerRights = { 63: 'K', 56: 'Q', 7: 'k', 0: 'q' };
-  if (cornerRights[move.from]) strip(cornerRights[move.from]);
-  if (cornerRights[move.to]) strip(cornerRights[move.to]);
-
-  return {
-    board,
-    turn: color === 'w' ? 'b' : 'w',
-    castling,
-    ep: type === 'p' && Math.abs(move.to - move.from) === 16 ? (move.from + move.to) / 2 : -1,
-    halfmove: type === 'p' || captured || enPassantCapture ? 0 : state.halfmove + 1,
-    fullmove: state.fullmove + (color === 'b' ? 1 : 0),
-  };
-}
-
-export function legalMoves(state) {
-  const moves = [];
-  state.board.forEach((piece, sq) => {
-    if (!piece || colorOf(piece) !== state.turn) return;
-    for (const move of pseudoMoves(state, sq)) {
-      if (!inCheck(applyMove(state, move), state.turn)) moves.push(move);
-    }
-  });
-  return moves;
-}
-
-export function perft(state, depth) {
-  if (depth === 0) return 1;
-  let total = 0;
-  for (const move of legalMoves(state)) total += perft(applyMove(state, move), depth - 1);
-  return total;
-}
-
-// Returns { over, result, text } for the side to move.
-export function gameStatus(state, moves = legalMoves(state)) {
-  const side = state.turn === 'w' ? 'White' : 'Black';
-  if (!moves.length) {
-    if (inCheck(state)) return { over: true, result: 'checkmate', text: `Checkmate. ${state.turn === 'w' ? 'Black' : 'White'} wins` };
-    return { over: true, result: 'stalemate', text: 'Stalemate. Draw' };
-  }
-  if (state.board.every((piece) => !piece || piece.toLowerCase() === 'k')) return { over: true, result: 'draw', text: 'Only kings left. Draw' };
-  if (state.halfmove >= 100) return { over: true, result: 'draw', text: 'Fifty-move rule. Draw' };
-  return { over: false, result: null, text: inCheck(state) ? `${side} to move, in check` : `${side} to move` };
-}
-
-function material(board, color) {
-  let score = 0;
-  board.forEach((piece, sq) => {
-    if (!piece) return;
-    // A small pull toward the center keeps the AI from shuffling pieces aimlessly.
-    const center = 0.03 * (3.5 - Math.abs(3.5 - colOf(sq))) + 0.02 * (3.5 - Math.abs(3.5 - rowOf(sq)));
-    const value = VALUES[piece.toLowerCase()] + center;
-    score += colorOf(piece) === color ? value : -value;
-  });
-  return score;
-}
-
-// Two-ply material search: picks the move whose worst-case reply leaves the most material.
-export function chooseAiMove(state, random = Math.random) {
-  const me = state.turn;
-  let best = null;
-  let bestScore = -Infinity;
-  for (const move of legalMoves(state)) {
-    if (move.promo && move.promo !== 'q') continue;
-    const after = applyMove(state, move);
-    const replies = legalMoves(after);
-    let score;
-    if (!replies.length) {
-      score = inCheck(after) ? 1000 : 0;
-    } else {
-      score = Infinity;
-      for (const reply of replies) score = Math.min(score, material(applyMove(after, reply).board, me));
-    }
-    score += random() * 0.05;
-    if (score > bestScore) {
-      bestScore = score;
-      best = move;
-    }
-  }
-  return best;
-}
+import {
+  newGame, applyMove, legalMoves, gameStatus, inCheck, chooseAiMove,
+  colorOf, rowOf, colOf, squareName, squareIndex, AI_LEVELS,
+} from './chess-engine.js';
 
 const GLYPHS = { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
 // U+FE0E asks for the text form so pieces do not render as color emoji.
 const glyph = (piece) => (piece ? `${GLYPHS[piece.toLowerCase()]}︎` : '');
+const START_COUNTS = { p: 8, n: 2, b: 2, r: 2, q: 1 };
+const PIECE_VALUE = { p: 1, n: 3, b: 3, r: 5, q: 9 };
+const LEVEL_NOTES = { easy: 'Makes mistakes', medium: 'Looks two moves ahead', hard: 'Thinks deeper' };
+// The computer always plays black.
+const AI_COLOR = 'b';
+// Keeps the computer's reply from appearing instantly, so the player sees their own move land.
+const MIN_THINK_MS = 450;
+
+// Pieces each side has taken, and the material balance from white's point of view.
+function capturedPieces(board) {
+  const present = { w: {}, b: {} };
+  for (const piece of board) {
+    if (!piece) continue;
+    const bucket = present[colorOf(piece)];
+    const type = piece.toLowerCase();
+    bucket[type] = (bucket[type] ?? 0) + 1;
+  }
+  const takenFrom = (color) => Object.entries(START_COUNTS)
+    .flatMap(([type, count]) => Array(Math.max(0, count - (present[color][type] ?? 0))).fill(type));
+  const byWhite = takenFrom('b');
+  const byBlack = takenFrom('w');
+  const worth = (list) => list.reduce((sum, type) => sum + PIECE_VALUE[type], 0);
+  return { byWhite, byBlack, balance: worth(byWhite) - worth(byBlack) };
+}
 
 function create(ctx) {
+  let phase = 'setup'; // 'setup' | 'playing'
+  let mode = { type: 'ai', level: 'medium' };
   let state = newGame();
   let history = [];
   let selected = -1;
   let lastMove = null;
-  let mode = 'ai';
   let aiPending = false;
+  let requestId = 0;
+  let thinkStarted = 0;
+  let worker;
 
-  const aiColor = 'b';
-  const aiTurn = () => mode === 'ai' && state.turn === aiColor;
+  const aiTurn = () => phase === 'playing' && mode.type === 'ai' && state.turn === AI_COLOR;
+
+  function getWorker() {
+    if (worker !== undefined) return worker;
+    try {
+      worker = new Worker(new URL('./chess-worker.js', import.meta.url), { type: 'module' });
+      worker.onmessage = (event) => deliverAiMove(event.data.id, event.data.move);
+      worker.onerror = (event) => {
+        event.preventDefault?.();
+        worker.terminate();
+        worker = null;
+        // Finish the current request on the main thread instead.
+        if (aiPending) computeOnMainThread(requestId);
+      };
+    } catch {
+      worker = null;
+    }
+    return worker;
+  }
+
+  function computeOnMainThread(id) {
+    ctx.after(30, () => deliverAiMove(id, chooseAiMove(state, { level: mode.level })));
+  }
+
+  function requestAiMove() {
+    const id = ++requestId;
+    aiPending = true;
+    thinkStarted = performance.now();
+    const w = getWorker();
+    if (w) w.postMessage({ id, state, level: mode.level });
+    else computeOnMainThread(id);
+  }
+
+  function deliverAiMove(id, move) {
+    if (id !== requestId || ctx.destroyed) return;
+    const wait = Math.max(0, MIN_THINK_MS - (performance.now() - thinkStarted));
+    ctx.after(wait, () => {
+      if (id !== requestId) return;
+      aiPending = false;
+      if (move && aiTurn()) play(move);
+      ctx.update();
+    });
+  }
+
+  function cancelAi() {
+    requestId += 1;
+    aiPending = false;
+  }
 
   function play(move) {
     history.push({ state, lastMove });
     state = applyMove(state, move);
     lastMove = move;
     selected = -1;
-    if (aiTurn() && !gameStatus(state).over) scheduleAi();
+    if (aiTurn() && !gameStatus(state).over) requestAiMove();
   }
 
-  function scheduleAi() {
-    aiPending = true;
-    // A short pause so the player's move is visible before the reply appears.
-    ctx.after(450, () => {
-      aiPending = false;
-      if (!aiTurn() || gameStatus(state).over) return;
-      const move = chooseAiMove(state);
-      if (move) play(move);
-      ctx.update();
-    });
-  }
-
-  function reset() {
+  function start(newMode) {
+    cancelAi();
+    mode = newMode;
     state = newGame();
     history = [];
     selected = -1;
     lastMove = null;
-    aiPending = false;
+    phase = 'playing';
+  }
+
+  ctx.onDestroy(() => {
+    cancelAi();
+    worker?.terminate();
+  });
+
+  // ---------- Layout ----------
+
+  function boardWidgets(board, interactive) {
+    const aspect = ctx.aspect();
+    const pad = 0.012;
+    const frame = rect(board.x - pad / aspect, board.y - pad, board.width + (2 * pad) / aspect, board.height + 2 * pad);
+    const cell = grid(board, 8, 8, 0, 0);
+    const moves = interactive ? legalMoves(state) : [];
+    const targets = selected >= 0 ? moves.filter((move) => move.from === selected) : [];
+    const checkedKing = interactive && inCheck(state) ? state.board.indexOf(state.turn === 'w' ? 'K' : 'k') : -1;
+    const isLight = (sq) => (rowOf(sq) + colOf(sq)) % 2 === 0;
+    const widgets = [text('board-frame', frame, '', 'board')];
+
+    state.board.forEach((piece, sq) => {
+      const variant = ['sq', isLight(sq) ? 'light' : 'dark'];
+      if (piece) variant.push(colorOf(piece) === 'w' ? 'pw' : 'pb');
+      if (lastMove && (sq === lastMove.from || sq === lastMove.to)) variant.push('last');
+      if (sq === selected) variant.push('sel');
+      if (sq === checkedKing) variant.push('check-sq');
+      const enPassant = sq === state.ep && state.board[selected]?.toLowerCase() === 'p';
+      if (targets.some((move) => move.to === sq)) variant.push(piece || enPassant ? 'cap' : 'move');
+      const make = interactive ? button : text;
+      widgets.push(make(`sq-${squareName(sq)}`, cell(rowOf(sq), colOf(sq)), glyph(piece), variant));
+    });
+
+    // File letters along the bottom rank and rank numbers down the a-file, drawn over the squares.
+    const coordColor = (sq) => (isLight(sq) ? 'coord-light' : 'coord-dark');
+    for (let i = 0; i < 8; i += 1) {
+      widgets.push(
+        text(`file-${i}`, cell(7, i), 'abcdefgh'[i], ['coord', 'corner-br', coordColor(56 + i)]),
+        text(`rank-${i}`, cell(i, 0), String(8 - i), ['coord', 'corner-tl', coordColor(i * 8)]),
+      );
+    }
+    return widgets;
+  }
+
+  function setupWidgets() {
+    const area = inset(rect(0, 0, 1, 1), 0.035);
+    const wide = ctx.aspect() >= 1.3;
+    const widgets = [];
+    let panel = area;
+    if (wide) {
+      // A preview of the starting position beside the options.
+      const [boardArea, side] = columns(area, [1.1, 1], 0.05);
+      widgets.push(...boardWidgets(squareIn(inset(boardArea, 0.015), ctx.aspect(), 'left'), false));
+      panel = side;
+    }
+    const [title, subtitle, levelLabel, levelButtons, levelNotes, , twoLabel, twoButton] =
+      rows(panel, [1.3, 0.6, 0.5, 1.4, 0.9, 0.2, 0.5, 1.3], 0.02);
+    widgets.push(
+      text('title', title, 'Chess', ['huge', 'left']),
+      text('subtitle', subtitle, 'You play white. Choose an opponent.', ['left', 'muted', 'small']),
+      text('level-label', levelLabel, 'Play the computer', ['label', 'left']),
+    );
+    const buttonCells = columns(levelButtons, [1, 1, 1], 0.025);
+    const noteCells = columns(levelNotes, [1, 1, 1], 0.025);
+    Object.entries(AI_LEVELS).forEach(([level, settings], i) => {
+      widgets.push(
+        button(`level-${level}`, buttonCells[i], settings.label, level === 'medium' ? 'primary' : undefined),
+        text(`level-note-${level}`, noteCells[i], LEVEL_NOTES[level], ['small', 'faint']),
+      );
+    });
+    widgets.push(
+      text('two-label', twoLabel, 'Or pass and play', ['label', 'left']),
+      button('two-players', twoButton, '2 players', undefined, { icon: 'users' }),
+    );
+    return widgets;
+  }
+
+  function statusText(status) {
+    if (aiPending) return 'Computer is thinking...';
+    if (status.over) return status.text;
+    if (mode.type === 'ai') return inCheck(state) ? 'Your move. You are in check!' : 'Your move';
+    return status.text;
+  }
+
+  const capturedLine = (list) => list.map((type) => `${GLYPHS[type]}︎`).join('') || '-';
+
+  function playingWidgets() {
+    const area = inset(rect(0, 0, 1, 1), 0.03);
+    const aspect = ctx.aspect();
+    const wide = aspect >= 1.15;
+    const [boardArea, panel] = wide ? columns(area, [1.55, 1], 0.045) : rows(area, [3.4, 1], 0.03);
+    const board = squareIn(inset(boardArea, 0.015), aspect, wide ? 'left' : 'center');
+    const widgets = boardWidgets(board, true);
+
+    const status = gameStatus(state);
+    const modeLabel = mode.type === 'ai' ? `vs Computer · ${AI_LEVELS[mode.level].label}` : '2 players';
+    const newButton = (cell, label) => button('new', cell, label, status.over ? 'primary' : undefined, { icon: 'plus' });
+    const undoButton = (cell) => button('undo', cell, 'Undo', undefined, { icon: 'undo', disabled: !history.length || aiPending });
+
+    if (!wide) {
+      const [statusCell, controls] = rows(panel, [1, 1], 0.03);
+      const [undoCell, newCell] = columns(controls, [1, 1], 0.03);
+      widgets.push(
+        text('status', statusCell, `${statusText(status)}  ·  ${modeLabel}`, ['hero', 'small']),
+        undoButton(undoCell),
+        newButton(newCell, 'New game'),
+      );
+      return widgets;
+    }
+
+    const [chip, statusCell, captured, last, controls] = rows(panel, [0.7, 1.6, 1.6, 0.6, 1], 0.035);
+    const [takenLabel, byWhiteCell, byBlackCell] = rows(captured, [0.6, 1, 1], 0.02);
+    const [undoCell, newCell] = columns(controls, [1, 1], 0.03);
+    const { byWhite, byBlack, balance } = capturedPieces(state.board);
+    const whiteName = mode.type === 'ai' ? 'You' : 'White';
+    const blackName = mode.type === 'ai' ? 'Computer' : 'Black';
+    const lead = balance === 0 ? '' : `  ·  ${balance > 0 ? whiteName : blackName} +${Math.abs(balance)}`;
+    widgets.push(
+      text('mode', chip, modeLabel, 'chip', { icon: mode.type === 'ai' ? 'cpu' : 'users' }),
+      text('status', statusCell, statusText(status), status.over ? ['hero', 'title'] : 'hero'),
+      text('taken-label', takenLabel, `Captured${lead}`, ['label', 'left']),
+      text('taken-white', byWhiteCell, `${whiteName}  ${capturedLine(byWhite)}`, ['left', 'small', 'pieces']),
+      text('taken-black', byBlackCell, `${blackName}  ${capturedLine(byBlack)}`, ['left', 'small', 'pieces']),
+      text('last', last, lastMove ? `Last move  ${squareName(lastMove.from)} → ${squareName(lastMove.to)}` : 'No moves yet', ['left', 'small', 'muted']),
+      undoButton(undoCell),
+      newButton(newCell, status.over ? 'New game' : 'New'),
+    );
+    return widgets;
   }
 
   return {
     widgets() {
-      const area = inset(rect(0, 0, 1, 1), 0.025);
-      const aspect = ctx.aspect();
-      const wide = aspect >= 1.15;
-      const [boardArea, panelArea] = wide ? columns(area, [1.6, 1], 0.03) : rows(area, [3.2, 1], 0.03);
-      const board = squareIn(boardArea, aspect, wide ? 'left' : 'center');
-      const cell = grid(board, 8, 8, 0, 0);
-      const moves = legalMoves(state);
-      const status = gameStatus(state, moves);
-      const targets = selected >= 0 ? moves.filter((move) => move.from === selected) : [];
-      const checkedKing = inCheck(state) ? state.board.indexOf(state.turn === 'w' ? 'K' : 'k') : -1;
-
-      const widgets = state.board.map((piece, sq) => {
-        const variant = ['sq', (rowOf(sq) + colOf(sq)) % 2 ? 'dark' : 'light'];
-        if (piece) variant.push(colorOf(piece) === 'w' ? 'pw' : 'pb');
-        if (lastMove && (sq === lastMove.from || sq === lastMove.to)) variant.push('last');
-        if (sq === selected) variant.push('sel');
-        if (sq === checkedKing) variant.push('check-sq');
-        const enPassant = sq === state.ep && state.board[selected]?.toLowerCase() === 'p';
-        if (targets.some((move) => move.to === sq)) variant.push(piece || enPassant ? 'cap' : 'move');
-        return button(`sq-${squareName(sq)}`, cell(rowOf(sq), colOf(sq)), glyph(piece), variant);
-      });
-
-      let statusText = status.text;
-      if (aiPending) statusText = 'Computer is thinking...';
-      else if (mode === 'ai' && !status.over && state.turn === 'w') statusText = inCheck(state) ? 'Your move, in check' : 'Your move (white)';
-      const modeText = mode === 'ai' ? 'Mode: vs computer' : 'Mode: 2 players';
-
-      let statusCell, modeCell, undoCell, newCell;
-      if (wide) {
-        let controls;
-        [statusCell, modeCell, controls] = rows(panelArea, [2.2, 1, 1], 0.04);
-        [undoCell, newCell] = columns(controls, [1, 1], 0.03);
-      } else {
-        let controls;
-        [statusCell, controls] = rows(panelArea, [1, 1], 0.04);
-        [modeCell, undoCell, newCell] = columns(controls, [1.4, 1, 1], 0.02);
-      }
-      widgets.push(
-        text('status', statusCell, statusText, status.over ? 'accent' : undefined),
-        button('mode', modeCell, modeText, 'ghost'),
-        button('undo', undoCell, 'Undo', undefined, { disabled: !history.length || aiPending }),
-        button('new', newCell, 'New game', 'danger'),
-      );
-      return widgets;
+      return phase === 'setup' ? setupWidgets() : playingWidgets();
     },
     handleAction({ widget_id: id }) {
-      if (id === 'new') { reset(); return; }
-      if (id === 'mode') {
-        mode = mode === 'ai' ? 'two' : 'ai';
-        selected = -1;
-        if (aiTurn() && !aiPending && !gameStatus(state).over) scheduleAi();
+      if (phase === 'setup') {
+        if (id.startsWith('level-') && AI_LEVELS[id.slice(6)]) start({ type: 'ai', level: id.slice(6) });
+        else if (id === 'two-players') start({ type: 'two' });
         return;
       }
+      if (id === 'new') { cancelAi(); phase = 'setup'; return; }
       if (id === 'undo') {
         if (aiPending) return;
         // Against the computer, undo takes back the computer's reply and your move.
-        let steps = mode === 'ai' && state.turn === 'w' ? 2 : 1;
+        let steps = mode.type === 'ai' && state.turn !== AI_COLOR ? 2 : 1;
         while (steps-- > 0 && history.length) ({ state, lastMove } = history.pop());
         selected = -1;
-        if (aiTurn()) scheduleAi();
+        if (aiTurn()) requestAiMove();
         return;
       }
       if (!id.startsWith('sq-') || aiTurn() || gameStatus(state).over) return;

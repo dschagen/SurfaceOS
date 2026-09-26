@@ -94,6 +94,15 @@ export function stepPong(game, dt, { ai = false, p2Keys = { up: false, down: fal
   if (right.score >= WIN_SCORE) game.winner = 'right';
 }
 
+const LEFT_COLOR = '#a78bfa';
+const RIGHT_COLOR = '#ffb547';
+
+function roundedRect(g, x, y, w, h, r) {
+  g.beginPath();
+  g.roundRect ? g.roundRect(x, y, w, h, r) : g.rect(x, y, w, h);
+  g.fill();
+}
+
 function draw(canvas, game, { paused, mode }) {
   const dpr = window.devicePixelRatio || 1;
   const width = Math.max(1, Math.round(canvas.clientWidth * dpr));
@@ -104,32 +113,45 @@ function draw(canvas, game, { paused, mode }) {
   }
   const g = canvas.getContext('2d');
   const unit = height;
-  g.fillStyle = '#0c1120';
+  const scale = width / game.width;
+
+  const background = g.createRadialGradient(width / 2, height / 2, 0, width / 2, height / 2, width * 0.7);
+  background.addColorStop(0, '#141a33');
+  background.addColorStop(1, '#070a16');
+  g.fillStyle = background;
   g.fillRect(0, 0, width, height);
 
-  g.strokeStyle = 'rgba(145, 164, 255, 0.35)';
+  g.strokeStyle = 'rgba(167, 139, 250, 0.28)';
   g.lineWidth = Math.max(2, unit * 0.006);
-  g.setLineDash([unit * 0.03, unit * 0.03]);
+  g.setLineDash([unit * 0.025, unit * 0.035]);
   g.beginPath();
-  g.moveTo(width / 2, 0);
-  g.lineTo(width / 2, height);
+  g.moveTo(width / 2, unit * 0.03);
+  g.lineTo(width / 2, height - unit * 0.03);
   g.stroke();
   g.setLineDash([]);
 
-  g.fillStyle = 'rgba(243, 246, 255, 0.85)';
-  g.font = `600 ${Math.round(unit * 0.16)}px system-ui, sans-serif`;
+  g.font = `200 ${Math.round(unit * 0.2)}px "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif`;
   g.textAlign = 'center';
   g.textBaseline = 'top';
-  g.fillText(String(game.left.score), width * 0.35, unit * 0.05);
-  g.fillText(String(game.right.score), width * 0.65, unit * 0.05);
+  g.fillStyle = 'rgba(167, 139, 250, 0.55)';
+  g.fillText(String(game.left.score), width * 0.36, unit * 0.04);
+  g.fillStyle = 'rgba(255, 181, 71, 0.55)';
+  g.fillText(String(game.right.score), width * 0.64, unit * 0.04);
 
-  const scale = width / game.width;
-  g.fillStyle = '#91a4ff';
-  g.fillRect(PADDLE_MARGIN * scale, (game.left.y - PADDLE_HEIGHT / 2) * unit, PADDLE_WIDTH * scale, PADDLE_HEIGHT * unit);
-  g.fillStyle = '#ffb347';
-  g.fillRect((game.width - PADDLE_MARGIN - PADDLE_WIDTH) * scale, (game.right.y - PADDLE_HEIGHT / 2) * unit, PADDLE_WIDTH * scale, PADDLE_HEIGHT * unit);
+  const paddleRadius = PADDLE_WIDTH * scale / 2;
+  g.shadowBlur = unit * 0.04;
+  g.shadowColor = LEFT_COLOR;
+  g.fillStyle = LEFT_COLOR;
+  roundedRect(g, PADDLE_MARGIN * scale, (game.left.y - PADDLE_HEIGHT / 2) * unit, PADDLE_WIDTH * scale, PADDLE_HEIGHT * unit, paddleRadius);
+  g.shadowColor = RIGHT_COLOR;
+  g.fillStyle = RIGHT_COLOR;
+  roundedRect(g, (game.width - PADDLE_MARGIN - PADDLE_WIDTH) * scale, (game.right.y - PADDLE_HEIGHT / 2) * unit, PADDLE_WIDTH * scale, PADDLE_HEIGHT * unit, paddleRadius);
+  g.shadowColor = '#ffffff';
   g.fillStyle = '#ffffff';
-  g.fillRect((game.ball.x - BALL_SIZE / 2) * scale, (game.ball.y - BALL_SIZE / 2) * unit, BALL_SIZE * unit, BALL_SIZE * unit);
+  g.beginPath();
+  g.arc(game.ball.x * scale, game.ball.y * unit, (BALL_SIZE * unit) / 2, 0, Math.PI * 2);
+  g.fill();
+  g.shadowBlur = 0;
 
   let banner = '';
   if (game.winner) {
@@ -140,10 +162,10 @@ function draw(canvas, game, { paused, mode }) {
     banner = 'Paused';
   }
   if (banner) {
-    g.fillStyle = 'rgba(12, 17, 32, 0.7)';
-    g.fillRect(0, unit * 0.38, width, unit * 0.24);
+    g.fillStyle = 'rgba(7, 10, 22, 0.72)';
+    g.fillRect(0, 0, width, height);
     g.fillStyle = '#ffffff';
-    g.font = `700 ${Math.round(unit * 0.11)}px system-ui, sans-serif`;
+    g.font = `700 ${Math.round(unit * 0.12)}px "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif`;
     g.textBaseline = 'middle';
     g.fillText(banner, width / 2, unit * 0.5);
   }
@@ -196,21 +218,21 @@ function create(ctx) {
   return {
     widgets() {
       if (!mode) {
-        const [title, hint, choices] = rows(inset(rect(0, 0, 1, 1), 0.06), [1.2, 1, 1.4], 0.05);
+        const [title, hint, choices] = rows(inset(rect(0, 0, 1, 1), 0.06), [1.3, 0.9, 1.4], 0.05);
         const [solo, duo] = columns(choices, [1, 1], 0.04);
         return [
-          text('title', title, 'Pong', ['bare', 'huge']),
-          text('hint', hint, 'Player 1 moves the left paddle with the pointer. Player 2 uses the Up and Down arrow keys.', ['bare', 'small', 'muted']),
-          button('play-ai', solo, '1 player vs AI', ['primary', 'large']),
-          button('play-two', duo, '2 players', ['large']),
+          text('title', title, 'PONG', ['huge', 'accent-text']),
+          text('hint', hint, 'Player 1 moves the left paddle with the pointer. Player 2 uses the Up and Down arrow keys.', ['small', 'muted']),
+          button('play-ai', solo, '1 player', ['primary', 'large'], { icon: 'cpu' }),
+          button('play-two', duo, '2 players', 'large', { icon: 'users' }),
         ];
       }
-      const [status, pause, restart, menu] = columns(TOP_BAR, [3, 1, 1, 1], 0.015);
+      const [status, pause, restart, menu] = columns(TOP_BAR, [3, 1.2, 1.3, 1.1], 0.015);
       return [
-        text('status', status, mode === 'ai' ? 'You (left) vs AI' : 'P1 pointer vs P2 arrow keys', ['left', 'bare', 'small', 'muted']),
-        button('pause', pause, paused ? 'Resume' : 'Pause', undefined, { disabled: !!game?.winner }),
-        button('restart', restart, game?.winner ? 'Play again' : 'Restart', game?.winner ? 'accent' : undefined),
-        button('menu', menu, 'Menu', 'ghost'),
+        text('status', status, mode === 'ai' ? 'You vs Computer' : 'Pointer vs Arrow keys', 'chip', { icon: mode === 'ai' ? 'cpu' : 'users' }),
+        button('pause', pause, paused ? 'Resume' : 'Pause', 'subtle', { icon: paused ? 'play' : 'pause', disabled: !!game?.winner }),
+        button('restart', restart, game?.winner ? 'Again' : 'Restart', game?.winner ? 'primary' : 'subtle', { icon: 'reset' }),
+        button('menu', menu, 'Menu', 'ghost', { icon: 'home' }),
         { id: 'field', type: 'canvas', ...FIELD },
       ];
     },

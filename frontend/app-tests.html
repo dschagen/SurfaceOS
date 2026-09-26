@@ -18,7 +18,7 @@
 <script type="module">
   import { mountApp, APPS } from "./apps/app-host.js";
   import { evaluate, formatNumber } from "./apps/calculator.js";
-  import { fromFEN, newGame, perft, legalMoves, gameStatus, applyMove, chooseAiMove, squareIndex, squareName } from "./apps/chess.js";
+  import { fromFEN, newGame, perft, legalMoves, gameStatus, applyMove, chooseAiMove, squareIndex, squareName, AI_LEVELS } from "./apps/chess-engine.js";
   import { formatStopwatch, formatCountdown } from "./apps/timer.js";
   import { describeWeather } from "./apps/weather.js";
   import { monthCells, dateKey } from "./apps/calendar.js";
@@ -136,19 +136,69 @@
 
   await test("chess AI captures a checking piece for free", () => {
     const state = fromFEN("k7/8/8/8/8/8/1q6/R6K b - - 0 1");
-    const move = chooseAiMove(state, () => 0);
-    assertEqual([squareName(move.from), squareName(move.to)], ["b2", "a1"]);
+    for (const level of ["medium", "hard"]) {
+      const move = chooseAiMove(state, { level, random: () => 0.5 });
+      assertEqual([squareName(move.from), squareName(move.to)], ["b2", "a1"], level);
+    }
+  });
+
+  await test("chess medium and hard find mate in one", () => {
+    const state = fromFEN("6k1/5ppp/8/8/8/8/8/R5K1 w - - 0 1");
+    for (const level of ["medium", "hard"]) {
+      const move = chooseAiMove(state, { level, random: () => 0.5 });
+      assertEqual(gameStatus(applyMove(state, move)).result, "checkmate", level);
+    }
+  });
+
+  await test("chess medium and hard move an attacked queen to safety", () => {
+    // The black queen on d5 is attacked by the pawn on c4.
+    const state = fromFEN("4k3/8/8/3q4/2P5/8/8/4K3 b - - 0 1");
+    for (const level of ["medium", "hard"]) {
+      const after = applyMove(state, chooseAiMove(state, { level, random: () => 0.5 }));
+      const queen = after.board.indexOf("q");
+      assertEqual(legalMoves(after).some((m) => m.to === queen), false, `${level} leaves the queen capturable`);
+    }
+  });
+
+  await test("every chess level returns a legal move within its time budget", () => {
+    const state = newGame();
+    const legal = legalMoves(state).map((m) => `${m.from}-${m.to}`);
+    for (const [level, settings] of Object.entries(AI_LEVELS)) {
+      const started = performance.now();
+      const move = chooseAiMove(state, { level });
+      const elapsed = performance.now() - started;
+      if (!legal.includes(`${move.from}-${move.to}`)) throw new Error(`${level} returned an illegal move`);
+      if (elapsed > settings.timeMs + 700) throw new Error(`${level} took ${Math.round(elapsed)} ms`);
+    }
   });
 
   await test("chess app moves a piece with two presses", async () => {
     const { app, box } = mount("chess", 700, 440);
-    press(app, box, "mode"); await tick();
+    assertEqual(box.querySelectorAll('[data-widget-id^="level-"].surfaceos-widget--button').length, 3, "three difficulty buttons");
+    press(app, box, "two-players"); await tick();
     press(app, box, "sq-e2"); await tick();
     assertEqual(box.querySelector('[data-widget-id="sq-e4"]').className.includes("surfaceos-v-move"), true, "e4 marked as a target");
     press(app, box, "sq-e4"); await tick();
     assertEqual(textOf(box, "sq-e4"), "♟︎", "pawn on e4");
     assertEqual(textOf(box, "sq-e2"), "", "e2 empty");
     assertEqual(textOf(box, "status"), "Black to move");
+    app.destroy();
+  });
+
+  await test("chess computer replies through the worker", async () => {
+    const { app, box } = mount("chess", 700, 440);
+    press(app, box, "level-easy"); await tick();
+    press(app, box, "sq-e2"); await tick();
+    press(app, box, "sq-e4"); await tick();
+    assertEqual(textOf(box, "status"), "Computer is thinking...");
+    const blackStart = [..."abcdefgh"].flatMap((f) => [`sq-${f}7`, `sq-${f}8`]).map((id) => textOf(box, id)).join("");
+    // The worker loads its modules over the network, which headless test runs do not fast-forward.
+    for (let i = 0; i < 600 && textOf(box, "status") === "Computer is thinking..."; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    const blackNow = [..."abcdefgh"].flatMap((f) => [`sq-${f}7`, `sq-${f}8`]).map((id) => textOf(box, id)).join("");
+    assertEqual(textOf(box, "status"), "Your move");
+    assertEqual(blackNow !== blackStart, true, "black moved a piece");
     app.destroy();
   });
 
@@ -164,12 +214,15 @@
   });
 
   await test("timer counts down from a preset", async () => {
-    const { app, box } = mount("timer");
+    const { app, box, warnings } = mount("timer", 360, 300);
     press(app, box, "tab-timer"); await tick();
     press(app, box, "tm-add-10s"); await tick();
     assertEqual(textOf(box, "display"), "0:10");
     press(app, box, "tm-toggle"); await tick();
     assertEqual(textOf(box, "tm-toggle"), "Pause");
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    assertEqual(box.querySelector('[data-widget-id="track"]') !== null, true, "progress bar shown");
+    assertEqual(warnings, [], "no layout warnings while running");
     app.destroy();
   });
 
@@ -178,7 +231,7 @@
     app.receiveText("buy milk"); await tick();
     assertEqual(textOf(box, "item-1"), "Buy milk");
     press(app, box, "check-1"); await tick();
-    assertEqual(textOf(box, "title"), "Tasks: 0 left");
+    assertEqual(textOf(box, "count"), "0 left");
     press(app, box, "delete-1"); await tick();
     assertEqual(textOf(box, "item-1"), undefined);
     app.destroy();

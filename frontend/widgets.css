@@ -2,96 +2,233 @@
   SurfaceOS widget styles. Everything is scoped under .surfaceos-widgets, the content element
   the shell hands to the renderer. Text sizes use container units so they follow the window size.
   Variant classes (surfaceos-v-*) come from a widget's optional "variant" field.
+  Each app sets its own accent color through a surfaceos-app-* class on the container.
 */
 
 .surfaceos-widgets {
+  --sw-accent: #7c9cff;
+  --sw-accent-ink: #0b1020;
+  --sw-text: #f4f6ff;
+  --sw-muted: #97a2c0;
+  --sw-faint: #5f6a88;
+  --sw-surface: rgba(255, 255, 255, 0.055);
+  --sw-surface-2: rgba(255, 255, 255, 0.1);
+  --sw-border: rgba(255, 255, 255, 0.13);
+  --sw-good: #34c38f;
+  --sw-danger: #ff5d6c;
+  --sw-shadow: 0 0.15em 0.6em rgba(0, 0, 0, 0.28);
+
   position: relative; width: 100%; height: 100%; overflow: hidden; user-select: none;
   container-type: size;
-  --sw-ink: #111625;
-  --sw-panel: #20283c;
-  --sw-button: #334dbb;
-  --sw-button-edge: #91a4ff;
-  --sw-hover: #4460d6;
-  --sw-accent: #ffb347;
-  --sw-text: #f3f6ff;
-  --sw-muted: #9aa6c4;
-  --sw-danger: #d9534f;
-  --sw-good: #3fae7a;
+  color: var(--sw-text);
 }
+
+.surfaceos-app-calculator { --sw-accent: #ffb547; }
+.surfaceos-app-browser { --sw-accent: #5cc8ff; }
+.surfaceos-app-todo { --sw-accent: #3dd598; }
+.surfaceos-app-notepad { --sw-accent: #ffd166; }
+.surfaceos-app-calendar { --sw-accent: #ff7a8a; }
+.surfaceos-app-timer { --sw-accent: #4dd6c8; }
+.surfaceos-app-pong { --sw-accent: #a78bfa; }
+.surfaceos-app-chess { --sw-accent: #e6b877; }
+.surfaceos-app-music { --sw-accent: #ff6fb1; }
+.surfaceos-app-weather { --sw-accent: #62b6ff; }
+
+/* ---------- Base widgets ---------- */
 
 .surfaceos-widgets .surfaceos-widget {
   box-sizing: border-box; position: absolute; margin: 0;
   display: flex; align-items: center; justify-content: center; text-align: center;
-  padding: 0 0.4em; overflow: hidden; overflow-wrap: anywhere;
-  font: 500 clamp(10px, 4.5cqmin, 40px)/1.2 system-ui, "Segoe UI", sans-serif;
+  padding: 0 0.5em; overflow: hidden; overflow-wrap: anywhere;
+  font: 500 clamp(11px, 4.4cqmin, 40px)/1.25 "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  letter-spacing: 0.005em;
 }
+
+.surfaceos-widgets .surfaceos-widget--text { color: var(--sw-text); }
 
 .surfaceos-widgets .surfaceos-widget--button {
-  color: #fff; background: var(--sw-button); border: 1px solid var(--sw-button-edge); border-radius: 0.5em;
-  cursor: inherit; transition: background-color 120ms, border-color 120ms, transform 120ms;
+  color: var(--sw-text);
+  font-weight: 600;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--sw-border);
+  border-radius: 0.7em;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), var(--sw-shadow);
+  cursor: inherit;
+  transition: background 140ms, border-color 140ms, box-shadow 140ms, transform 120ms, color 140ms;
 }
-.surfaceos-widgets .surfaceos-widget--text { color: var(--sw-text); background: var(--sw-panel); border-radius: 0.4em; }
-.surfaceos-widgets .surfaceos-widget--canvas { padding: 0; display: block; border-radius: 0.3em; background: #0c1120; }
-.surfaceos-widgets .surfaceos-widget--video { padding: 0; object-fit: contain; background: #000; border-radius: 0.3em; }
+
+.surfaceos-widgets .surfaceos-widget--canvas { padding: 0; display: block; border-radius: 0.7em; background: #080c18; }
+.surfaceos-widgets .surfaceos-widget--video { padding: 0; object-fit: contain; background: #000; border-radius: 0.6em; }
 
 /* Hand input has no hover cue of its own, so hover and press are drawn from renderer state. */
-.surfaceos-widgets .surfaceos-widget--hover { background: var(--sw-hover); border-color: #c4cfff; }
-.surfaceos-widgets .surfaceos-widget--pressed { background: var(--sw-accent); border-color: var(--sw-accent); color: var(--sw-ink); transform: scale(0.96); }
-.surfaceos-widgets .surfaceos-widget--disabled { opacity: 0.4; }
+.surfaceos-widgets .surfaceos-widget--hover {
+  border-color: color-mix(in srgb, var(--sw-accent) 75%, transparent);
+  background: color-mix(in srgb, var(--sw-accent) 20%, rgba(255, 255, 255, 0.06));
+  box-shadow: 0 0 0 0.12em color-mix(in srgb, var(--sw-accent) 35%, transparent), var(--sw-shadow);
+}
+.surfaceos-widgets .surfaceos-widget--pressed {
+  background: var(--sw-accent); border-color: var(--sw-accent); color: var(--sw-accent-ink);
+  transform: scale(0.96);
+}
+.surfaceos-widgets .surfaceos-widget--disabled { opacity: 0.35; box-shadow: none; }
 
-/* General variants */
-.surfaceos-widgets .surfaceos-v-bare { background: transparent; border-color: transparent; }
+/* ---------- Icons ---------- */
+
+.surfaceos-widgets .surfaceos-has-icon { gap: 0.45em; }
+.surfaceos-widgets .surfaceos-icon {
+  width: 1.2em; height: 1.2em; flex: none;
+  fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+.surfaceos-widgets .surfaceos-icon .surfaceos-icon-fill { fill: currentColor; stroke-width: 1.5; }
+.surfaceos-widgets .surfaceos-icon-only .surfaceos-icon { width: 1.45em; height: 1.45em; }
+.surfaceos-widgets .surfaceos-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- Text layout variants ---------- */
+
 .surfaceos-widgets .surfaceos-v-left { justify-content: flex-start; text-align: left; }
 .surfaceos-widgets .surfaceos-v-right { justify-content: flex-end; text-align: right; }
-.surfaceos-widgets .surfaceos-v-top { align-items: flex-start; padding-top: 0.3em; }
+.surfaceos-widgets .surfaceos-v-top { align-items: flex-start; padding-top: 0.4em; }
 .surfaceos-widgets .surfaceos-v-pre { white-space: pre-wrap; }
 /* Keeps the newest lines of long text visible by clipping from the top. */
-.surfaceos-widgets .surfaceos-v-tail { flex-direction: column; justify-content: flex-end; align-items: stretch; text-align: left; padding: 0.4em 0.6em; }
-.surfaceos-widgets .surfaceos-v-mono { font-family: Consolas, "Cascadia Mono", monospace; font-variant-numeric: tabular-nums; }
-.surfaceos-widgets .surfaceos-v-small { font-size: clamp(9px, 3cqmin, 24px); }
-.surfaceos-widgets .surfaceos-v-large { font-size: clamp(14px, 8cqmin, 72px); font-weight: 600; }
-.surfaceos-widgets .surfaceos-v-huge { font-size: clamp(18px, 16cqmin, 160px); font-weight: 600; font-variant-numeric: tabular-nums; }
-.surfaceos-widgets .surfaceos-v-title { font-weight: 700; }
+.surfaceos-widgets .surfaceos-v-tail { flex-direction: column; justify-content: flex-end; align-items: stretch; text-align: left; padding: 0.5em 0.8em; }
+.surfaceos-widgets .surfaceos-v-mono { font-family: "Cascadia Mono", Consolas, monospace; font-variant-numeric: tabular-nums; letter-spacing: 0; }
+.surfaceos-widgets .surfaceos-v-small { font-size: clamp(10px, 3.3cqmin, 26px); }
+.surfaceos-widgets .surfaceos-v-large { font-size: clamp(14px, 7cqmin, 64px); font-weight: 650; }
+.surfaceos-widgets .surfaceos-v-huge { font-size: clamp(20px, 17cqmin, 170px); font-weight: 300; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.surfaceos-widgets .surfaceos-v-title { font-weight: 700; font-size: clamp(12px, 5.2cqmin, 46px); }
 .surfaceos-widgets .surfaceos-v-muted { color: var(--sw-muted); }
-.surfaceos-widgets .surfaceos-v-error { color: #ff8a7a; }
-.surfaceos-widgets .surfaceos-v-primary { background: var(--sw-good); border-color: #8fe0b8; }
-.surfaceos-widgets .surfaceos-v-accent { background: var(--sw-accent); border-color: #ffd49a; color: var(--sw-ink); }
-.surfaceos-widgets .surfaceos-v-danger { background: var(--sw-danger); border-color: #f2a09d; }
-.surfaceos-widgets .surfaceos-v-ghost { background: transparent; border-color: #4a5680; }
-.surfaceos-widgets .surfaceos-v-selected { background: #5a2fb3; border-color: #c8b2ff; }
-.surfaceos-widgets .surfaceos-v-listening { background: var(--sw-danger); border-color: #ffb0ad; animation: surfaceos-pulse 1s ease-in-out infinite alternate; }
-.surfaceos-widgets .surfaceos-v-alarm { color: var(--sw-ink); background: var(--sw-accent); animation: surfaceos-pulse 0.5s ease-in-out infinite alternate; }
+.surfaceos-widgets .surfaceos-v-faint { color: var(--sw-faint); }
+.surfaceos-widgets .surfaceos-v-error { color: #ff8f9a; }
+.surfaceos-widgets .surfaceos-v-accent-text { color: var(--sw-accent); }
+.surfaceos-widgets .surfaceos-v-label { font-size: clamp(9px, 2.8cqmin, 20px); font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--sw-muted); }
 
-@keyframes surfaceos-pulse { from { opacity: 1; } to { opacity: 0.55; } }
+/* ---------- Surfaces ---------- */
 
-/* Todo check boxes */
-.surfaceos-widgets .surfaceos-v-check { background: transparent; border: 2px solid var(--sw-button-edge); font-weight: 700; }
-.surfaceos-widgets .surfaceos-v-done { text-decoration: line-through; color: var(--sw-muted); }
+.surfaceos-widgets .surfaceos-v-card { background: var(--sw-surface); border: 1px solid rgba(255, 255, 255, 0.07); border-radius: 0.8em; }
+.surfaceos-widgets .surfaceos-v-chip {
+  background: color-mix(in srgb, var(--sw-accent) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sw-accent) 40%, transparent);
+  color: color-mix(in srgb, var(--sw-accent) 70%, white);
+  border-radius: 999px; font-size: clamp(9px, 2.9cqmin, 22px); font-weight: 650;
+}
+.surfaceos-widgets .surfaceos-v-hero {
+  background: radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--sw-accent) 32%, transparent), transparent 60%), var(--sw-surface);
+  border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 0.9em;
+}
 
-/* Calendar */
-.surfaceos-widgets .surfaceos-v-day { background: var(--sw-panel); border-color: #33405f; border-radius: 0.3em; font-size: clamp(9px, 3.6cqmin, 30px); }
-.surfaceos-widgets .surfaceos-v-outside { color: #5c6784; }
-.surfaceos-widgets .surfaceos-v-today { border: 2px solid var(--sw-accent); }
-.surfaceos-widgets .surfaceos-v-has-event::after { content: ""; position: absolute; bottom: 12%; left: 50%; width: 0.35em; height: 0.35em; margin-left: -0.175em; border-radius: 50%; background: var(--sw-accent); }
-.surfaceos-widgets .surfaceos-v-day.surfaceos-v-selected { background: #5a2fb3; border-color: #c8b2ff; color: #fff; }
+/* ---------- Button styles ---------- */
 
-/* Chess */
-.surfaceos-widgets .surfaceos-v-sq { border: 0; border-radius: 0; padding: 0; font-family: "Segoe UI Symbol", "DejaVu Sans", "Noto Sans Symbols 2", sans-serif; font-size: clamp(12px, 8.5cqmin, 90px); line-height: 1; transform: none; }
-.surfaceos-widgets .surfaceos-v-light { background: #d9c7a3; }
-.surfaceos-widgets .surfaceos-v-dark { background: #8b6a4a; }
-.surfaceos-widgets .surfaceos-v-pw { color: #fff; text-shadow: 0 0 2px #000, 0 0 2px #000, 0 0 1px #000; }
-.surfaceos-widgets .surfaceos-v-pb { color: #111; text-shadow: 0 0 1px #fff; }
-.surfaceos-widgets .surfaceos-v-last { box-shadow: inset 0 0 0 100px rgba(255, 214, 0, 0.28); }
-.surfaceos-widgets .surfaceos-v-sel { box-shadow: inset 0 0 0 100px rgba(80, 160, 255, 0.5); }
-.surfaceos-widgets .surfaceos-v-check-sq { box-shadow: inset 0 0 1.2em 0.2em rgba(230, 40, 40, 0.95); }
-.surfaceos-widgets .surfaceos-v-move::after { content: ""; position: absolute; width: 30%; height: 30%; border-radius: 50%; background: rgba(20, 90, 40, 0.55); }
-.surfaceos-widgets .surfaceos-v-cap { box-shadow: inset 0 0 0 0.18em rgba(20, 110, 40, 0.8); }
-.surfaceos-widgets .surfaceos-v-sq.surfaceos-widget--hover { filter: brightness(1.12); }
-.surfaceos-widgets .surfaceos-v-sq.surfaceos-widget--pressed { filter: brightness(1.3); color: inherit; }
+.surfaceos-widgets .surfaceos-v-primary {
+  color: var(--sw-accent-ink);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--sw-accent) 82%, white), var(--sw-accent));
+  border-color: transparent;
+  box-shadow: 0 0.2em 0.9em color-mix(in srgb, var(--sw-accent) 40%, transparent);
+}
+.surfaceos-widgets .surfaceos-v-primary.surfaceos-widget--hover { background: color-mix(in srgb, var(--sw-accent) 70%, white); }
+.surfaceos-widgets .surfaceos-v-good { color: #06150f; background: linear-gradient(180deg, #5ee0ad, var(--sw-good)); border-color: transparent; }
+.surfaceos-widgets .surfaceos-v-danger { color: #ffc2c8; background: rgba(255, 93, 108, 0.14); border-color: rgba(255, 93, 108, 0.45); }
+.surfaceos-widgets .surfaceos-v-danger.surfaceos-widget--hover { background: rgba(255, 93, 108, 0.28); border-color: #ff8f9a; box-shadow: none; }
+.surfaceos-widgets .surfaceos-v-ghost { background: transparent; box-shadow: none; }
+.surfaceos-widgets .surfaceos-v-subtle { background: var(--sw-surface); border-color: transparent; box-shadow: none; }
+.surfaceos-widgets .surfaceos-v-selected {
+  background: color-mix(in srgb, var(--sw-accent) 26%, transparent);
+  border-color: color-mix(in srgb, var(--sw-accent) 70%, transparent);
+  color: color-mix(in srgb, var(--sw-accent) 45%, white);
+}
+.surfaceos-widgets .surfaceos-v-round { border-radius: 999px; }
+.surfaceos-widgets .surfaceos-v-listening {
+  color: #fff; background: var(--sw-danger); border-color: transparent;
+  animation: surfaceos-pulse 1s ease-in-out infinite alternate;
+}
+.surfaceos-widgets .surfaceos-v-alarm { color: var(--sw-accent-ink); background: var(--sw-accent); border-radius: 0.8em; animation: surfaceos-pulse 0.5s ease-in-out infinite alternate; }
+
+@keyframes surfaceos-pulse { from { opacity: 1; } to { opacity: 0.6; } }
+
+/* ---------- Calculator ---------- */
+
+.surfaceos-widgets .surfaceos-v-display { background: rgba(0, 0, 0, 0.28); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 0.8em; }
+.surfaceos-widgets .surfaceos-v-key { font-size: clamp(14px, 6.5cqmin, 56px); font-weight: 500; }
+.surfaceos-widgets .surfaceos-v-op { color: var(--sw-accent); background: color-mix(in srgb, var(--sw-accent) 12%, rgba(255, 255, 255, 0.04)); }
+
+/* ---------- Todo ---------- */
+
+.surfaceos-widgets .surfaceos-v-check { border-radius: 999px; border: 2px solid color-mix(in srgb, var(--sw-accent) 60%, transparent); background: transparent; box-shadow: none; color: var(--sw-accent-ink); }
+.surfaceos-widgets .surfaceos-v-check.surfaceos-v-checked { background: var(--sw-accent); border-color: var(--sw-accent); }
+.surfaceos-widgets .surfaceos-v-row { background: var(--sw-surface); border-radius: 0.6em; padding: 0 0.8em; }
+.surfaceos-widgets .surfaceos-v-done { text-decoration: line-through; color: var(--sw-faint); }
+
+/* ---------- Notepad ---------- */
+
+.surfaceos-widgets .surfaceos-v-paper {
+  background:
+    repeating-linear-gradient(to bottom, transparent 0, transparent calc(1.5em - 1px), rgba(255, 209, 102, 0.12) calc(1.5em - 1px), rgba(255, 209, 102, 0.12) 1.5em),
+    rgba(255, 244, 214, 0.05);
+  border: 1px solid rgba(255, 209, 102, 0.18);
+  border-radius: 0.8em; line-height: 1.5em;
+}
+
+/* ---------- Calendar ---------- */
+
+.surfaceos-widgets .surfaceos-v-day { background: transparent; border-color: transparent; box-shadow: none; border-radius: 0.55em; font-size: clamp(10px, 3.6cqmin, 30px); font-weight: 550; }
+.surfaceos-widgets .surfaceos-v-outside { color: var(--sw-faint); }
+.surfaceos-widgets .surfaceos-v-today { border: 2px solid var(--sw-accent); color: var(--sw-accent); }
+.surfaceos-widgets .surfaceos-v-has-event::after { content: ""; position: absolute; bottom: 10%; left: 50%; width: 0.32em; height: 0.32em; margin-left: -0.16em; border-radius: 50%; background: var(--sw-accent); }
+.surfaceos-widgets .surfaceos-v-day.surfaceos-v-selected { background: var(--sw-accent); border-color: var(--sw-accent); color: var(--sw-accent-ink); }
+.surfaceos-widgets .surfaceos-v-day.surfaceos-v-selected.surfaceos-v-has-event::after { background: var(--sw-accent-ink); }
+.surfaceos-widgets .surfaceos-v-event { background: var(--sw-surface); border-left: 0.25em solid var(--sw-accent); border-radius: 0.4em; padding: 0 0.7em; }
+
+/* ---------- Timer ---------- */
+
+.surfaceos-widgets .surfaceos-v-track { background: rgba(255, 255, 255, 0.08); border-radius: 999px; padding: 0; }
+.surfaceos-widgets .surfaceos-v-fill { background: linear-gradient(90deg, color-mix(in srgb, var(--sw-accent) 60%, transparent), var(--sw-accent)); border-radius: 999px; padding: 0; }
+
+/* ---------- Music ---------- */
+
+.surfaceos-widgets .surfaceos-v-art {
+  color: var(--sw-accent-ink);
+  background: linear-gradient(135deg, var(--sw-accent), #8b5cf6 60%, #3b82f6);
+  border-radius: 0.9em; box-shadow: 0 0.4em 1.4em rgba(0, 0, 0, 0.35);
+}
+.surfaceos-widgets .surfaceos-v-art .surfaceos-icon { width: 55%; height: 55%; stroke-width: 1.6; opacity: 0.85; }
+
+/* ---------- Weather ---------- */
+
+.surfaceos-widgets .surfaceos-v-glyph .surfaceos-icon { width: 80%; height: 80%; max-width: 3.5em; max-height: 3.5em; color: var(--sw-accent); stroke-width: 1.7; }
+.surfaceos-widgets .surfaceos-v-forecast { flex-direction: column; gap: 0.25em; background: var(--sw-surface); border-radius: 0.8em; padding: 0.4em 0.2em; }
+.surfaceos-widgets .surfaceos-v-forecast .surfaceos-icon { width: 1.9em; height: 1.9em; color: var(--sw-accent); }
+.surfaceos-widgets .surfaceos-v-forecast .surfaceos-label { white-space: pre-line; }
+
+/* ---------- Chess ---------- */
+
+.surfaceos-widgets .surfaceos-v-board { background: #5b3f28; border-radius: 0.5em; box-shadow: 0 0.4em 1.4em rgba(0, 0, 0, 0.45); }
+.surfaceos-widgets .surfaceos-v-sq {
+  border: 0; border-radius: 0; padding: 0; box-shadow: none; transform: none; transition: none;
+  font-family: "Segoe UI Symbol", "DejaVu Sans", "Noto Sans Symbols 2", sans-serif;
+  font-size: clamp(12px, 8.6cqmin, 92px); font-weight: 400; line-height: 1;
+}
+.surfaceos-widgets .surfaceos-v-light { background: #ecd9b9; }
+.surfaceos-widgets .surfaceos-v-dark { background: #b08a66; }
+.surfaceos-widgets .surfaceos-v-pw { color: #fffdf8; text-shadow: 0 0 1px #2a1a0c, 0 0 2px #2a1a0c, 0 0.04em 0.08em rgba(0, 0, 0, 0.6); }
+.surfaceos-widgets .surfaceos-v-pb { color: #1d1712; text-shadow: 0 0 1px rgba(255, 255, 255, 0.35), 0 0.04em 0.08em rgba(0, 0, 0, 0.4); }
+.surfaceos-widgets .surfaceos-v-last { box-shadow: inset 0 0 0 100px rgba(255, 221, 87, 0.32); }
+.surfaceos-widgets .surfaceos-v-sel { box-shadow: inset 0 0 0 100px rgba(98, 182, 255, 0.5); }
+.surfaceos-widgets .surfaceos-v-check-sq { box-shadow: inset 0 0 1.1em 0.25em rgba(255, 40, 40, 0.9); }
+.surfaceos-widgets .surfaceos-v-move::after { content: ""; position: absolute; width: 28%; height: 28%; border-radius: 50%; background: rgba(30, 20, 10, 0.3); }
+.surfaceos-widgets .surfaceos-v-cap { box-shadow: inset 0 0 0 0.16em rgba(30, 20, 10, 0.4); }
+.surfaceos-widgets .surfaceos-v-sq.surfaceos-widget--hover { filter: brightness(1.1); border: 0; }
+.surfaceos-widgets .surfaceos-v-sq.surfaceos-widget--pressed { filter: brightness(1.25); color: inherit; transform: none; }
 .surfaceos-widgets .surfaceos-v-sq.surfaceos-v-light.surfaceos-widget--hover,
-.surfaceos-widgets .surfaceos-v-sq.surfaceos-v-light.surfaceos-widget--pressed { background: #d9c7a3; }
+.surfaceos-widgets .surfaceos-v-sq.surfaceos-v-light.surfaceos-widget--pressed { background: #ecd9b9; }
 .surfaceos-widgets .surfaceos-v-sq.surfaceos-v-dark.surfaceos-widget--hover,
-.surfaceos-widgets .surfaceos-v-sq.surfaceos-v-dark.surfaceos-widget--pressed { background: #8b6a4a; }
+.surfaceos-widgets .surfaceos-v-sq.surfaceos-v-dark.surfaceos-widget--pressed { background: #b08a66; }
+.surfaceos-widgets .surfaceos-v-coord { padding: 0.15em 0.3em; font-size: clamp(9px, 2.8cqmin, 20px); font-weight: 700; pointer-events: none; }
+.surfaceos-widgets .surfaceos-v-coord-light { color: #b08a66; }
+.surfaceos-widgets .surfaceos-v-coord-dark { color: #ecd9b9; }
+.surfaceos-widgets .surfaceos-v-corner-br { align-items: flex-end; justify-content: flex-end; }
+.surfaceos-widgets .surfaceos-v-corner-tl { align-items: flex-start; justify-content: flex-start; }
+.surfaceos-widgets .surfaceos-v-pieces { font-family: "Segoe UI Symbol", "DejaVu Sans", sans-serif; letter-spacing: 0.02em; }
+
+/* ---------- Developer warnings ---------- */
 
 .surfaceos-widgets .surfaceos-widget-warnings {
   position: absolute; left: 6px; right: 6px; bottom: 6px; margin: 0; padding: 6px 10px 6px 24px; z-index: 1;

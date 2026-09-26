@@ -5,6 +5,16 @@ import { button, text, rows, columns, grid, rect, inset } from './layout.js';
 
 const REFRESH_MS = 15 * 60 * 1000;
 
+export function weatherIcon(code) {
+  if (code <= 1) return 'sun';
+  if (code === 2) return 'cloud-sun';
+  if (code === 3) return 'cloud';
+  if (code === 45 || code === 48) return 'fog';
+  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return 'snow';
+  if (code >= 95) return 'storm';
+  return 'rain';
+}
+
 // WMO weather interpretation codes used by Open-Meteo.
 export function describeWeather(code) {
   if (code === 0) return 'Clear';
@@ -68,43 +78,45 @@ function create(ctx) {
 
   return {
     widgets() {
-      const [header, now, details, forecast, footer] = rows(inset(rect(0, 0, 1, 1), 0.035), [0.9, 2, 0.8, 2.4, 0.8], 0.025);
-      const [placeCell, refreshCell] = columns(header, [3, 1]);
+      const area = inset(rect(0, 0, 1, 1), 0.04);
+      const [header, now, forecast, footer] = rows(area, [0.85, 2.6, 2.3, 0.55], 0.035);
+      const [placeCell, refreshCell] = columns(header, [3, 1.1], 0.02);
       const widgets = [
-        text('place', placeCell, place.name, ['left', 'bare', 'title']),
-        button('refresh', refreshCell, loading ? 'Loading' : 'Refresh', 'ghost', { disabled: loading }),
+        text('place', placeCell, place.name, ['title', 'left']),
+        button('refresh', refreshCell, loading ? 'Loading' : 'Refresh', 'ghost', { icon: 'refresh', disabled: loading }),
       ];
       if (!data) {
-        widgets.push(text('message', rect(now.x, now.y, now.width, forecast.y + forecast.height - now.y), error || 'Loading weather...', [error ? 'error' : 'muted']));
+        widgets.push(text('message', rect(now.x, now.y, now.width, forecast.y + forecast.height - now.y), error || 'Loading weather...', [error ? 'error' : 'muted', 'card']));
         return widgets;
       }
 
       const current = data.current;
-      const [temperature, condition] = columns(now, [1, 1.3], 0.02);
+      const [iconCell, temperature, detailsCell] = columns(now, [1, 1.3, 1.6], 0.02);
+      const [condition, details] = rows(detailsCell, [1, 1.3], 0.02);
       widgets.push(
-        text('temperature', temperature, `${Math.round(current.temperature_2m)}°`, ['huge', 'bare']),
-        text('condition', condition, describeWeather(current.weather_code), ['large', 'bare', 'left']),
-        text('details', details, `Feels ${Math.round(current.apparent_temperature)}°   Humidity ${current.relative_humidity_2m}%   Wind ${Math.round(current.wind_speed_10m)} mph`, ['small', 'muted', 'bare']),
+        text('now-card', now, '', 'hero'),
+        text('now-icon', iconCell, '', 'glyph', { icon: weatherIcon(current.weather_code) }),
+        text('temperature', temperature, `${Math.round(current.temperature_2m)}°`, 'huge'),
+        text('condition', condition, describeWeather(current.weather_code), ['title', 'left']),
+        text('details', details, `Feels like ${Math.round(current.apparent_temperature)}°\nHumidity ${current.relative_humidity_2m}%  ·  Wind ${Math.round(current.wind_speed_10m)} mph`, ['small', 'muted', 'left', 'pre']),
       );
 
       const daily = data.daily;
-      const days = daily.time.length;
-      const cell = grid(forecast, 1, days, 0.012);
+      const cell = grid(forecast, 1, daily.time.length, 0.015);
       daily.time.forEach((isoDate, i) => {
         const [y, m, d] = isoDate.split('-').map(Number);
         const label = i === 0 ? 'Today' : new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'short' });
         const rain = daily.precipitation_probability_max?.[i];
         const lines = [
           label,
-          describeWeather(daily.weather_code[i]),
           `${Math.round(daily.temperature_2m_max[i])}° / ${Math.round(daily.temperature_2m_min[i])}°`,
           rain === null || rain === undefined ? '' : `Rain ${rain}%`,
-        ];
-        widgets.push(text(`day-${i}`, cell(0, i), lines.join('\n').trim(), ['pre', 'small']));
+        ].filter(Boolean);
+        widgets.push(text(`day-${i}`, cell(0, i), lines.join('\n'), ['forecast', 'small'], { icon: weatherIcon(daily.weather_code[i]) }));
       });
 
       const updated = fetchedAt ? `Updated ${fetchedAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : '';
-      widgets.push(text('footer', footer, [error || updated, 'Weather data by Open-Meteo.com'].filter(Boolean).join('   '), ['small', 'bare', error ? 'error' : 'muted']));
+      widgets.push(text('footer', footer, [error || updated, 'Weather data by Open-Meteo.com'].filter(Boolean).join('   ·   '), ['small', error ? 'error' : 'faint']));
       return widgets;
     },
     handleAction({ widget_id: id }) {

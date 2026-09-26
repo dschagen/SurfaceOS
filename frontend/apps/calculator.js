@@ -115,16 +115,22 @@ function create(ctx) {
 
   return {
     widgets() {
-      const [display, pad] = rows(inset(rect(0, 0, 1, 1), 0.03), [1.1, 4]);
-      const [line1, line2] = rows(display, [1, 1.4], 0.01);
-      const cell = grid(pad, 5, 4, 0.02, 0.025);
+      const [display, pad] = rows(inset(rect(0, 0, 1, 1), 0.035), [1.25, 4], 0.035);
+      const [line1, line2] = rows(inset(display, 0.02, 0.015), [1, 1.5], 0);
+      const cell = grid(pad, 5, 4, 0.022, 0.028);
       const widgets = [
-        text('expression', line1, error || preview() || ' ', ['right', 'mono', 'muted', 'bare', ...(error ? ['error'] : [])]),
+        text('display-card', display, '', 'display'),
+        text('expression', line1, error || preview() || ' ', ['right', 'mono', 'small', error ? 'error' : 'muted']),
         text('display', line2, expression || '0', ['right', 'mono', 'large']),
       ];
       KEYS.forEach((row, r) => row.forEach((key, c) => {
-        const variant = key === '=' ? 'accent' : key === 'C' ? 'danger' : OPERATORS.has(key) || key === '(' || key === ')' ? 'selected' : undefined;
-        widgets.push(button(keyId(key), cell(r, c), key === '-' ? '−' : key, variant ? [variant, 'large'] : 'large'));
+        let variant = ['key'];
+        if (key === '=') variant = ['key', 'primary'];
+        else if (key === 'C') variant = ['key', 'danger'];
+        else if (OPERATORS.has(key) || key === '(' || key === ')') variant = ['key', 'op'];
+        const extra = key === '⌫' ? { icon: 'backspace' } : {};
+        const label = key === '⌫' ? '' : key === '-' ? '−' : key;
+        widgets.push(button(keyId(key), cell(r, c), label, variant, extra));
       }));
       return widgets;
     },

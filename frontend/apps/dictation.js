@@ -88,9 +88,6 @@ export function createDictationControl(ctx, onFinal) {
     buttonText(idleText = 'Dictate') {
       return control.listening ? 'Stop' : idleText;
     },
-    buttonVariant() {
-      return control.listening ? 'listening' : 'accent';
-    },
   };
   ctx.onDestroy(() => control.stop?.());
   return control;

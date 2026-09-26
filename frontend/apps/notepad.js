@@ -25,18 +25,19 @@ function create(ctx) {
 
   return {
     widgets() {
-      const [page, status, controls] = rows(inset(rect(0, 0, 1, 1), 0.03), [6, 0.7, 1.2], 0.02);
+      const area = inset(rect(0, 0, 1, 1), 0.035);
+      const [page, status, controls] = rows(area, [6, 0.6, 1.15], 0.025);
       const widgets = [
-        text('page', page, content || 'Empty note. Tap Dictate and start talking.', ['tail', 'pre', ...(content ? [] : ['muted'])]),
+        text('page', page, content || 'Tap Dictate and start talking.', ['paper', 'tail', 'pre', ...(content ? [] : ['muted'])]),
       ];
       const statusText = dictation.status();
-      if (statusText) widgets.push(text('status', status, statusText, ['left', 'bare', 'small', dictation.error ? 'error' : 'muted']));
-      const [dictate, newline, undo, clear] = columns(controls, [1.4, 1, 1, 1]);
+      if (statusText) widgets.push(text('status', status, statusText, ['left', 'small', dictation.error ? 'error' : 'muted']));
+      const [dictate, newline, undo, clear] = columns(controls, [1.5, 1, 1, 1], 0.025);
       widgets.push(
-        button('dictate', dictate, dictation.buttonText(), dictation.buttonVariant()),
-        button('newline', newline, 'New line', undefined, { disabled: !content }),
-        button('undo', undo, 'Undo', undefined, { disabled: !history.length }),
-        button('clear', clear, confirmClear ? 'Confirm?' : 'Clear', 'danger', { disabled: !content }),
+        button('dictate', dictate, dictation.buttonText(), dictation.listening ? 'listening' : 'primary', { icon: dictation.listening ? 'stop' : 'mic' }),
+        button('newline', newline, 'Line', undefined, { icon: 'new-line', disabled: !content }),
+        button('undo', undo, 'Undo', undefined, { icon: 'undo', disabled: !history.length }),
+        button('clear', clear, confirmClear ? 'Sure?' : 'Clear', 'danger', { icon: 'trash', disabled: !content }),
       );
       return widgets;
     },

@@ -223,6 +223,18 @@
     assertEqual(box.querySelector('[data-widget-id="b"]').getAttribute("onclick"), null, "no attribute injection");
   });
 
+  test("icons render as built-in SVG and unknown icons are warned", () => {
+    const { box } = setup({ version: 1, window_id: "w", widgets: [
+      { id: "a", type: "button", x: 0, y: 0, width: 0.5, height: 1, text: "Play", icon: "play" },
+      { id: "b", type: "button", x: 0.5, y: 0, width: 0.5, height: 1, text: "Oops", icon: "not-an-icon" },
+    ] });
+    const a = box.querySelector('[data-widget-id="a"]');
+    assertEqual(a.querySelector("svg.surfaceos-icon") !== null, true, "svg drawn");
+    assertEqual(a.textContent, "Play", "label kept");
+    assertEqual(box.querySelector('[data-widget-id="b"] svg'), null, "unknown icon ignored");
+    assertEqual(box.querySelectorAll(".surfaceos-widget-warnings li").length, 1, "warning");
+  });
+
   test("canvas and video widgets are exposed through getElement", () => {
     const { renderer } = setup({ version: 1, window_id: "w", widgets: [
       { id: "c", type: "canvas", x: 0, y: 0, width: 0.5, height: 1 },

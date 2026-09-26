@@ -58,6 +58,6 @@ export function button(id, area, text, variant, extra = {}) {
   return { id, type: 'button', ...area, text, ...(variant ? { variant } : {}), ...extra };
 }
 
-export function text(id, area, value, variant) {
-  return { id, type: 'text', ...area, text: value, ...(variant ? { variant } : {}) };
+export function text(id, area, value, variant, extra = {}) {
+  return { id, type: 'text', ...area, text: value, ...(variant ? { variant } : {}), ...extra };
 }

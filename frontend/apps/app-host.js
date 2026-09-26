@@ -23,6 +23,9 @@ export function mountApp(container, { type, windowId, onAction, dictation, servi
 
   let destroyed = false;
   let renderQueued = false;
+  // Selects the app's accent color in widgets.css.
+  const appClass = `surfaceos-app-${type}`;
+  container.classList.add(appClass);
   const cleanups = [];
 
   const renderer = createWidgetRenderer(container, {
@@ -131,6 +134,7 @@ export function mountApp(container, { type, windowId, onAction, dictation, servi
       }
       try { app.destroy?.(); } catch (error) { console.error(error); }
       renderer.clear();
+      container.classList.remove(appClass);
     },
   };
 }

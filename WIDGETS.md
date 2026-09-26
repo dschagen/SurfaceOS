@@ -18,7 +18,7 @@ For the music app, also run `python tools/media_bridge.py` (standard library onl
 | `calendar` | Calendar | Month view; events added by voice to the selected day. |
 | `timer` | Timer | Stopwatch with laps; countdown with presets and an alarm. |
 | `pong` | Pong | 1 player vs AI, or 2 players. Player 1 uses the pointer; player 2 uses the Up/Down arrow keys, because the hand input carries one pointer. |
-| `chess` | Chess | Full rules (castling, en passant, promotion to queen, check, mate, stalemate). Two players or vs a simple computer. |
+| `chess` | Chess | Full rules (castling, en passant, promotion to queen, check, mate, stalemate). A setup screen offers 2 players or the computer at Easy, Medium, or Hard. The computer searches in a Web Worker (`apps/chess-worker.js`) so the UI stays responsive; Hard thinks for up to about 2 seconds. |
 | `music` | Music | Controls whatever plays on the laptop (Spotify, a YouTube tab) with the system media keys, and shows the current track. Needs `tools/media_bridge.py`. |
 | `weather` | Weather | Live Open-Meteo forecast for Miami (FIU), no API key, needs internet. |
 
@@ -28,7 +28,7 @@ App data lives in memory only, so reloading the page gives a clean demo.
 
 ## Integrate with Carter's shell
 
-Each app owns its state and logic. The shell creates the window frame and a dedicated content element, then mounts an app by content type:
+Each app owns its state and logic. `mountApp` also adds a `surfaceos-app-<type>` class to the content element, which gives each app its accent color in `widgets.css`. The shell creates the window frame and a dedicated content element, then mounts an app by content type:
 
 ```js
 import { mountApp, APPS } from './apps/app-host.js';
@@ -65,6 +65,7 @@ Additions to the v1 layout contract, all optional and backward compatible:
 - Widget types `canvas` and `video`. App code reaches their elements through `getElement(id)` to draw or attach a stream; layout data still carries no code.
 - `variant`: a string or list of style tokens (`[a-z0-9-]`), applied only as `surfaceos-v-*` class names.
 - `disabled: true` on a button: drawn dimmed and never activates.
+- `icon`: the name of a built-in line icon from `icons.js` (for example `play`, `mic`, `trash`, `sun`), drawn before the text or alone. Unknown names are skipped with a warning; layout data never carries SVG.
 - Elements are reused across renders by widget id. A press in progress survives a re-render while its button still exists and is enabled; it is canceled if the button disappears, becomes disabled, or the layout is for a different window.
 
 Contract version stays **1**. The shell must keep window IDs unique.

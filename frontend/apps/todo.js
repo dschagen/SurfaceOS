@@ -23,38 +23,46 @@ function create(ctx) {
 
   return {
     widgets() {
-      const [header, list, status, footer] = rows(inset(rect(0, 0, 1, 1), 0.03), [1.1, 5.4, 0.8, 1.1], 0.02);
+      const area = inset(rect(0, 0, 1, 1), 0.035);
+      const [header, list, status, footer] = rows(area, [1.2, 5.6, 0.7, 1], 0.025);
       const remaining = items.filter((item) => !item.done).length;
-      const [title, dictate] = columns(header, [2, 1]);
+      const [titleCell, countCell, dictate] = columns(header, [1.4, 1, 1.5], 0.025);
       const widgets = [
-        text('title', title, items.length ? `Tasks: ${remaining} left` : 'Tasks', ['left', 'bare', 'title']),
-        button('dictate', dictate, dictation.buttonText('Add by voice'), dictation.buttonVariant()),
+        text('title', titleCell, 'Tasks', ['title', 'left']),
+        text('count', countCell, items.length ? `${remaining} left` : 'Empty', 'chip'),
+        button('dictate', dictate, dictation.listening ? 'Stop' : 'Add task', dictation.listening ? 'listening' : 'primary', { icon: dictation.listening ? 'stop' : 'mic' }),
       ];
 
       page = Math.min(page, pageCount() - 1);
       const visible = items.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
       if (!visible.length) {
-        widgets.push(text('empty', list, 'No tasks yet. Tap "Add by voice" and say a task.', ['muted', 'bare']));
+        widgets.push(text('empty', list, 'Nothing to do yet. Tap "Add task" and say it out loud.', ['muted', 'card'], { icon: 'list' }));
       }
-      const slots = rows(list, Array(PAGE_SIZE).fill(1), 0.015);
+      const slots = rows(list, Array(PAGE_SIZE).fill(1), 0.02);
+      const aspect = ctx.aspect();
       visible.forEach((item, i) => {
-        const [check, label, remove] = columns(slots[i], [1, 7, 1], 0.015);
+        const [rowArea, remove] = columns(slots[i], [8, 1], 0.015);
+        // Round check button at the left of the row, square on screen.
+        const checkSize = Math.min(rowArea.height * 0.72, (rowArea.width * aspect) / 4);
+        const check = rect(rowArea.x + 0.012, rowArea.y + (rowArea.height - checkSize) / 2, checkSize / aspect, checkSize);
+        const labelX = check.x + check.width + 0.02;
         widgets.push(
-          button(`check-${item.id}`, check, item.done ? '✓' : '', 'check'),
-          text(`item-${item.id}`, label, item.text, ['left', ...(item.done ? ['done'] : [])]),
-          button(`delete-${item.id}`, remove, '×', 'ghost'),
+          text(`row-${item.id}`, rowArea, '', 'row'),
+          button(`check-${item.id}`, check, '', item.done ? ['check', 'checked'] : 'check', item.done ? { icon: 'check' } : {}),
+          text(`item-${item.id}`, rect(labelX, rowArea.y, rowArea.x + rowArea.width - labelX, rowArea.height), item.text, ['left', ...(item.done ? ['done'] : [])]),
+          button(`delete-${item.id}`, remove, '', 'ghost', { icon: 'trash' }),
         );
       });
 
       const statusText = draft ? `Typing: ${draft}` : dictation.status();
-      if (statusText) widgets.push(text('status', status, statusText, ['left', 'bare', 'small', dictation.error && !draft ? 'error' : 'muted']));
+      if (statusText) widgets.push(text('status', status, statusText, ['left', 'small', dictation.error && !draft ? 'error' : 'muted']));
 
-      const [prev, pageLabel, next, clearDone] = columns(footer, [1, 1, 1, 2]);
+      const [prev, pageLabel, next, clearDone] = columns(footer, [1, 1, 1, 2.2], 0.02);
       widgets.push(
-        button('prev', prev, '‹', 'large', { disabled: page === 0 }),
-        text('page', pageLabel, `${page + 1} / ${pageCount()}`, ['bare', 'small', 'muted']),
-        button('next', next, '›', 'large', { disabled: page >= pageCount() - 1 }),
-        button('clear-done', clearDone, 'Clear done', 'ghost', { disabled: !items.some((item) => item.done) }),
+        button('prev', prev, '', 'subtle', { icon: 'chevron-left', disabled: page === 0 }),
+        text('page', pageLabel, `${page + 1} / ${pageCount()}`, ['small', 'muted']),
+        button('next', next, '', 'subtle', { icon: 'chevron-right', disabled: page >= pageCount() - 1 }),
+        button('clear-done', clearDone, 'Clear done', 'ghost', { icon: 'check', disabled: !items.some((item) => item.done) }),
       );
       return widgets;
     },

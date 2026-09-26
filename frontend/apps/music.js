@@ -62,44 +62,62 @@ function create(ctx) {
 
   return {
     widgets() {
-      const [info, transport, volume] = rows(inset(rect(0, 0, 1, 1), 0.04), [3, 1.5, 1.1], 0.04);
+      const area = inset(rect(0, 0, 1, 1), 0.04);
+      const aspect = ctx.aspect();
+      const [info, transport, volume] = rows(area, [3.2, 1.6, 0.9], 0.04);
       const widgets = [];
+      // Square cover area on the left, track details beside it.
+      const artSize = Math.min(info.height, (info.width * aspect) * 0.42);
+      const art = rect(info.x, info.y + (info.height - artSize) / 2, artSize / aspect, artSize);
+      const details = rect(art.x + art.width + 0.04, info.y, info.x + info.width - art.x - art.width - 0.04, info.height);
+      widgets.push(text('art', art, '', 'art', { icon: 'music' }));
+
       if (connection === 'offline') {
-        widgets.push(text('info', info, 'Media helper is not running.\nStart it with: python tools/media_bridge.py', ['pre', 'small', 'error']));
-      } else if (connection === 'connecting') {
-        widgets.push(text('info', info, 'Connecting to media helper...', ['muted']));
-      } else if (nowPlaying?.title) {
-        const [title, artist, source] = rows(info, [1.6, 1, 0.7], 0.02);
+        const [heading, body, retry] = rows(details, [1, 1.6, 1], 0.05);
         widgets.push(
-          text('title', title, nowPlaying.title, ['large', 'bare']),
-          text('artist', artist, [nowPlaying.artist, nowPlaying.album].filter(Boolean).join(' - ') || ' ', ['muted', 'bare']),
-          text('source', source, [nowPlaying.status, nowPlaying.app].filter(Boolean).join(' in '), ['small', 'muted', 'bare']),
+          text('heading', heading, 'Media helper offline', ['title', 'left']),
+          text('info', body, 'Start it on the laptop:\npython tools/media_bridge.py', ['pre', 'small', 'muted', 'left']),
+          button('retry', retry, 'Retry', 'subtle', { icon: 'refresh' }),
+        );
+      } else if (connection === 'connecting') {
+        widgets.push(text('info', details, 'Connecting...', ['muted', 'left']));
+      } else if (nowPlaying?.title) {
+        const [source, title, artist] = rows(details, [0.8, 1.6, 1.1], 0.03);
+        const status = [nowPlaying.status, nowPlaying.app].filter(Boolean).join(' · ');
+        widgets.push(
+          text('source', rect(source.x, source.y, Math.min(source.width, 0.3), source.height), status || 'Now playing', 'chip'),
+          text('title', title, nowPlaying.title, ['large', 'left']),
+          text('artist', artist, [nowPlaying.artist, nowPlaying.album].filter(Boolean).join(' - ') || ' ', ['muted', 'left']),
         );
       } else {
-        widgets.push(text('info', info, nowPlayingSupported
-          ? 'Nothing playing. Start music on the laptop, then use these controls.'
-          : 'Track info is unavailable on this system. The controls still work.', ['muted']));
+        const [heading, body] = rows(details, [1, 1.4], 0.04);
+        widgets.push(
+          text('heading', heading, 'Nothing playing', ['title', 'left']),
+          text('info', body, nowPlayingSupported ? 'Start music on the laptop, then control it here.' : 'Track info is unavailable. The controls still work.', ['small', 'muted', 'left']),
+        );
       }
 
       const offline = connection !== 'online';
       const playing = nowPlaying?.status === 'Playing';
-      const labels = {
-        previous: 'Prev', play_pause: playing ? 'Pause' : 'Play', next: 'Next',
-        volume_down: 'Vol -', mute: 'Mute', volume_up: 'Vol +',
+      const round = (cell, scale = 1) => {
+        const size = Math.min(cell.height, cell.width * aspect) * scale;
+        return rect(cell.x + (cell.width - size / aspect) / 2, cell.y + (cell.height - size) / 2, size / aspect, size);
       };
-      const transportCells = columns(transport, [1, 1.3, 1], 0.03);
+      const [prevCell, playCell, nextCell] = columns(transport, [1, 1.2, 1], 0.03);
+      widgets.push(
+        button('previous', round(prevCell, 0.72), '', ['round', 'subtle', 'large'], { icon: 'previous', disabled: offline }),
+        button('play_pause', round(playCell), '', ['round', 'primary', 'large', ...(lastCommand === 'play_pause' ? ['selected'] : [])], { icon: playing ? 'pause' : 'play', disabled: offline }),
+        button('next', round(nextCell, 0.72), '', ['round', 'subtle', 'large'], { icon: 'next', disabled: offline }),
+      );
       const volumeCells = columns(volume, [1, 1, 1], 0.03);
-      COMMANDS.forEach((command, i) => {
-        const cell = i < 3 ? transportCells[i] : volumeCells[i - 3];
-        const variant = i < 3 ? ['large'] : [];
-        if (command === 'play_pause') variant.push('primary');
-        if (command === lastCommand) variant.push('selected');
-        widgets.push(button(command, cell, labels[command], variant, { disabled: offline }));
+      [['volume_down', 'volume-down', 'Vol −'], ['mute', 'mute', 'Mute'], ['volume_up', 'volume-up', 'Vol +']].forEach(([command, icon, label], i) => {
+        widgets.push(button(command, volumeCells[i], label, lastCommand === command ? 'selected' : 'ghost', { icon, disabled: offline }));
       });
       return widgets;
     },
     handleAction({ widget_id: id }) {
       if (COMMANDS.includes(id)) send(id);
+      else if (id === 'retry') { connection = 'connecting'; poll(); }
     },
   };
 }

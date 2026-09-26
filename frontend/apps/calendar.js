@@ -45,17 +45,17 @@ function create(ctx) {
   }
 
   function monthWidgets(area) {
-    const [header, weekdays, days] = rows(area, [1, 0.6, 6], 0.012);
-    const [prev, title, next, todayButton] = columns(header, [1, 4, 1, 1.6]);
+    const [header, weekdays, days] = rows(area, [1, 0.55, 6], 0.015);
+    const [title, prev, next, todayButton] = columns(header, [3.4, 0.9, 0.9, 1.5], 0.02);
     const widgets = [
-      button('prev', prev, '‹'),
-      text('month', title, `${MONTHS[viewMonth]} ${viewYear}`, ['bare', 'title']),
-      button('next', next, '›'),
+      text('month', title, `${MONTHS[viewMonth]} ${viewYear}`, ['title', 'left']),
+      button('prev', prev, '', 'subtle', { icon: 'chevron-left' }),
+      button('next', next, '', 'subtle', { icon: 'chevron-right' }),
       button('today', todayButton, 'Today', 'ghost'),
     ];
     const weekdayCell = grid(weekdays, 1, 7, 0.008);
-    WEEKDAYS.forEach((name, i) => widgets.push(text(`wd-${i}`, weekdayCell(0, i), name, ['bare', 'small', 'muted'])));
-    const dayCell = grid(days, 6, 7, 0.008, 0.01);
+    WEEKDAYS.forEach((name, i) => widgets.push(text(`wd-${i}`, weekdayCell(0, i), name, 'label')));
+    const dayCell = grid(days, 6, 7, 0.008, 0.012);
     const todayKey = dateKey(today);
     monthCells(viewYear, viewMonth).forEach((date, i) => {
       const key = dateKey(date);
@@ -70,21 +70,21 @@ function create(ctx) {
   }
 
   function eventWidgets(area) {
-    const [title, list, status, dictate] = rows(area, [0.9, 4, 0.7, 1], 0.015);
-    const widgets = [text('selected-date', title, selectedLabel(), ['left', 'bare', 'title'])];
+    const [title, list, status, dictate] = rows(area, [0.9, 4, 0.6, 1], 0.02);
+    const widgets = [text('selected-date', title, selectedLabel(), ['left', 'accent-text', 'title'])];
     const dayEvents = events.get(selected) ?? [];
-    if (!dayEvents.length) widgets.push(text('no-events', list, 'No events', ['muted', 'bare', 'top']));
-    const slots = rows(list, Array(MAX_EVENT_ROWS).fill(1), 0.012);
+    if (!dayEvents.length) widgets.push(text('no-events', list, 'No events', ['muted', 'card'], { icon: 'calendar' }));
+    const slots = rows(list, Array(MAX_EVENT_ROWS).fill(1), 0.02);
     dayEvents.slice(-MAX_EVENT_ROWS).forEach((event, i) => {
-      const [label, remove] = columns(slots[i], [5, 1], 0.01);
+      const [label, remove] = columns(slots[i], [5, 1], 0.015);
       widgets.push(
-        text(`event-${event.id}`, label, event.text, ['left', 'small']),
-        button(`delete-${event.id}`, remove, '×', 'ghost'),
+        text(`event-${event.id}`, label, event.text, ['left', 'small', 'event']),
+        button(`delete-${event.id}`, remove, '', 'ghost', { icon: 'x' }),
       );
     });
     const statusText = dictation.status();
-    if (statusText) widgets.push(text('status', status, statusText, ['left', 'bare', 'small', dictation.error ? 'error' : 'muted']));
-    widgets.push(button('dictate', dictate, dictation.buttonText('Add event by voice'), dictation.buttonVariant()));
+    if (statusText) widgets.push(text('status', status, statusText, ['left', 'small', dictation.error ? 'error' : 'muted']));
+    widgets.push(button('dictate', dictate, dictation.listening ? 'Stop' : 'Add event', dictation.listening ? 'listening' : 'primary', { icon: dictation.listening ? 'stop' : 'mic' }));
     return widgets;
   }
 

@@ -1,5 +1,7 @@
 /** SurfaceOS widget renderer contract v1. No framework or global CSS required. */
 
+import { ICONS, createIcon } from './icons.js';
+
 const POINTER_TYPES = ['pointer_down', 'pointer_move', 'pointer_up', 'pointer_cancel'];
 const SUPPORTED = new Set(['button', 'text', 'canvas', 'video']);
 const VARIANT_TOKEN = /^[a-z0-9-]{1,32}$/;
@@ -36,6 +38,22 @@ function createElementFor(type) {
     return element;
   }
   return document.createElement(type === 'canvas' ? 'canvas' : 'div');
+}
+
+// Plain text stays a single text node; an icon adds an SVG and wraps the text in a label span.
+function setContent(element, text, icon) {
+  if (!icon) {
+    element.textContent = text;
+    return;
+  }
+  const parts = [createIcon(icon)];
+  if (text) {
+    const label = document.createElement('span');
+    label.className = 'surfaceos-label';
+    label.textContent = text;
+    parts.push(label);
+  }
+  element.replaceChildren(...parts);
 }
 
 export function createWidgetRenderer(container, { onAction = () => {}, warn = console.warn } = {}) {
@@ -120,16 +138,25 @@ export function createWidgetRenderer(container, { onAction = () => {}, warn = co
       const stateClasses = [...element.classList].filter((name) => name === 'surfaceos-widget--hover' || name === 'surfaceos-widget--pressed');
       element.className = [className, ...stateClasses].join(' ');
       element.dataset.widgetId = widget.id;
+      let text = null;
+      let icon = null;
       if (widget.type === 'button' || widget.type === 'text') {
-        const text = typeof widget.text === 'string' ? widget.text : '';
-        if (element.textContent !== text) element.textContent = text;
+        text = typeof widget.text === 'string' ? widget.text : '';
+        if (typeof widget.icon === 'string' && widget.icon) {
+          if (Object.hasOwn(ICONS, widget.icon)) icon = widget.icon;
+          else skipped.push([`Ignoring unknown icon "${widget.icon}" on widget "${widget.id}"`, widget]);
+        }
+        const unchanged = previous?.element === element && previous.text === text && previous.icon === icon;
+        if (!unchanged) setContent(element, text, icon);
+        element.classList.toggle('surfaceos-has-icon', !!icon);
+        element.classList.toggle('surfaceos-icon-only', !!icon && !text);
       }
       const { x, y, width, height } = widget;
       element.style.left = `${x * 100}%`;
       element.style.top = `${y * 100}%`;
       element.style.width = `${width * 100}%`;
       element.style.height = `${height * 100}%`;
-      const node = { id: widget.id, type: widget.type, x, y, width, height, disabled, element };
+      const node = { id: widget.id, type: widget.type, x, y, width, height, disabled, element, text, icon };
       next.set(widget.id, node);
       ordered.push(node);
     }

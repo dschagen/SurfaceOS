@@ -62,51 +62,62 @@ function create(ctx) {
     if (stopwatch.running || timer.running || timer.done) ctx.update();
   });
 
-  function stopwatchWidgets(display, laps, controls) {
+  function stopwatchWidgets(display, below, controls) {
     const elapsed = stopwatchElapsed();
-    const widgets = [text('display', display, formatStopwatch(elapsed), ['huge', 'mono', 'bare'])];
-    const lapLines = stopwatch.laps.slice(-3).map((lap) => `Lap ${lap.number}  ${formatStopwatch(lap.split)}`).reverse();
-    widgets.push(text('laps', laps, lapLines.join('\n') || ' ', ['mono', 'small', 'muted', 'bare', 'pre']));
+    const widgets = [text('display', display, formatStopwatch(elapsed), ['huge', 'mono'])];
+    const lapLines = stopwatch.laps.slice(-3).reverse().map((lap) => `Lap ${lap.number}    ${formatStopwatch(lap.split)}`);
+    widgets.push(text('laps', below, lapLines.join('\n') || 'Laps appear here', ['mono', 'small', 'muted', 'pre']));
     const [main, second] = columns(controls, [1, 1], 0.03);
     widgets.push(
-      button('sw-toggle', main, stopwatch.running ? 'Stop' : elapsed ? 'Resume' : 'Start', stopwatch.running ? ['danger', 'large'] : ['primary', 'large']),
+      button('sw-toggle', main, stopwatch.running ? 'Stop' : elapsed ? 'Resume' : 'Start',
+        stopwatch.running ? ['danger', 'large'] : ['primary', 'large'], { icon: stopwatch.running ? 'pause' : 'play' }),
       stopwatch.running
-        ? button('sw-lap', second, 'Lap', 'large')
-        : button('sw-reset', second, 'Reset', 'large', { disabled: !elapsed }),
+        ? button('sw-lap', second, 'Lap', 'large', { icon: 'flag' })
+        : button('sw-reset', second, 'Reset', 'large', { icon: 'reset', disabled: !elapsed }),
     );
     return widgets;
   }
 
-  function timerWidgets(display, presets, controls) {
+  function timerWidgets(display, below, controls) {
     if (timer.done) {
       return [
-        text('display', display, "Time's up", ['huge', 'alarm']),
-        button('tm-dismiss', controls, 'Dismiss', ['accent', 'large']),
+        text('display', rect(display.x, display.y, display.width, below.y + below.height - display.y), "Time's up", ['huge', 'alarm']),
+        button('tm-dismiss', controls, 'Dismiss', ['primary', 'large'], { icon: 'check' }),
       ];
     }
     const remaining = timerRemaining();
-    const widgets = [text('display', display, formatCountdown(remaining), ['huge', 'mono', 'bare'])];
-    if (!timer.running) {
-      const cells = columns(presets, [1, 1, 1, 1], 0.02);
-      [['tm-add-10s', '+10 s'], ['tm-add-1m', '+1 min'], ['tm-add-5m', '+5 min'], ['tm-clear', 'Clear']].forEach(([id, label], i) => {
-        widgets.push(button(id, cells[i], label, id === 'tm-clear' ? 'ghost' : undefined, { disabled: id === 'tm-clear' && !remaining }));
+    const widgets = [text('display', display, formatCountdown(remaining), ['huge', 'mono'])];
+    if (timer.running || (timer.set && remaining < timer.set)) {
+      // Progress bar showing how much of the countdown is left.
+      const bar = rect(below.x + below.width * 0.08, below.y + below.height * 0.42, below.width * 0.84, below.height * 0.16);
+      widgets.push(text('track', bar, '', 'track'));
+      const fraction = timer.set ? remaining / timer.set : 0;
+      if (fraction > 0.002) widgets.push(text('fill', { ...bar, width: bar.width * fraction }, '', 'fill'));
+    } else {
+      const cells = columns(inset(below, 0, below.height * 0.12), [1, 1, 1, 1], 0.02);
+      [['tm-add-10s', '+10 s'], ['tm-add-1m', '+1 min'], ['tm-add-5m', '+5 min']].forEach(([id, label], i) => {
+        widgets.push(button(id, cells[i], label, 'subtle'));
       });
+      widgets.push(button('tm-clear', cells[3], 'Clear', 'ghost', { disabled: !remaining }));
     }
     const [main, second] = columns(controls, [1, 1], 0.03);
     widgets.push(
-      button('tm-toggle', main, timer.running ? 'Pause' : 'Start', timer.running ? ['danger', 'large'] : ['primary', 'large'], { disabled: !timer.running && !remaining }),
-      button('tm-reset', second, 'Reset', 'large', { disabled: !timer.set }),
+      button('tm-toggle', main, timer.running ? 'Pause' : 'Start', timer.running ? ['danger', 'large'] : ['primary', 'large'],
+        { icon: timer.running ? 'pause' : 'play', disabled: !timer.running && !remaining }),
+      button('tm-reset', second, 'Reset', 'large', { icon: 'reset', disabled: !timer.set }),
     );
     return widgets;
   }
 
   return {
     widgets() {
-      const [tabs, display, middle, controls] = rows(inset(rect(0, 0, 1, 1), 0.04), [1, 2.6, 1.3, 1.3], 0.03);
+      const [tabs, display, middle, controls] = rows(inset(rect(0, 0, 1, 1), 0.04), [1, 2.6, 1.2, 1.3], 0.03);
       const [swTab, tmTab] = columns(tabs, [1, 1], 0.02);
+      // Shows a running countdown on the tab while the stopwatch is in view.
+      const timerLabel = timer.running && mode === 'stopwatch' ? `Timer  ${formatCountdown(timerRemaining())}` : 'Timer';
       const widgets = [
-        button('tab-stopwatch', swTab, 'Stopwatch', mode === 'stopwatch' ? 'selected' : 'ghost'),
-        button('tab-timer', tmTab, timer.running ? `Timer ${formatCountdown(timerRemaining())}` : 'Timer', mode === 'timer' || timer.done ? 'selected' : 'ghost'),
+        button('tab-stopwatch', swTab, 'Stopwatch', mode === 'stopwatch' && !timer.done ? 'selected' : 'ghost', { icon: 'stopwatch' }),
+        button('tab-timer', tmTab, timerLabel, mode === 'timer' || timer.done ? 'selected' : 'ghost', { icon: 'hourglass' }),
       ];
       // A finished timer takes over the window so it is noticed.
       if (mode === 'timer' || timer.done) return [...widgets, ...timerWidgets(display, middle, controls)];

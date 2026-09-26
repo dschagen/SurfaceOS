@@ -61,21 +61,26 @@ function create(ctx) {
 
   return {
     widgets() {
-      const area = inset(rect(0, 0, 1, 1), 0.02);
+      const area = inset(rect(0, 0, 1, 1), 0.035);
       if (!stream) {
-        const [intro, status, action] = rows(inset(area, 0.04), [3, 1, 1.2], 0.04);
+        const [hero, status, action] = rows(area, [3.4, 0.7, 1.2], 0.035);
+        const [iconCell, copy] = columns(hero, [1, 2.6], 0.03);
+        const [heading, steps] = rows(copy, [1, 2], 0.03);
         return [
-          text('intro', intro, 'Open Google, YouTube, or any site in Chrome on the laptop screen, then choose that window to show it here.', ['pre']),
-          text('status', status, message || (requesting ? 'Pick a window on the laptop screen...' : 'Needs a mouse click on this button.'), ['small', 'bare', message ? 'error' : 'muted']),
-          button('choose', action, requesting ? 'Waiting...' : 'Choose window', ['primary', 'large'], { disabled: requesting }),
+          text('hero', hero, '', 'hero'),
+          text('hero-icon', iconCell, '', 'glyph', { icon: 'monitor' }),
+          text('heading', heading, 'Mirror a browser window', ['title', 'left']),
+          text('steps', steps, '1. Open Google, YouTube, or any site in Chrome on the laptop screen.\n2. Click "Choose window" with the mouse and pick it.', ['pre', 'small', 'muted', 'left']),
+          text('status', status, message || (requesting ? 'Pick a window on the laptop screen...' : 'The picker needs a real mouse click; a pinch cannot open it.'), ['small', message ? 'error' : 'faint']),
+          button('choose', action, requesting ? 'Waiting for picker...' : 'Choose window', ['primary', 'large'], { icon: 'monitor', disabled: requesting }),
         ];
       }
-      const [bar, view] = rows(area, [0.9, 8], 0.015);
-      const [name, change, end] = columns(bar, [4, 1.4, 1], 0.015);
+      const [bar, view] = rows(inset(rect(0, 0, 1, 1), 0.02), [0.9, 8], 0.015);
+      const [name, change, end] = columns(bar, [4, 1.5, 1.1], 0.015);
       return [
-        text('label', name, label, ['left', 'bare', 'small', 'muted']),
-        button('choose', change, 'Change window', 'small'),
-        button('stop', end, 'Stop', ['danger', 'small']),
+        text('label', name, label, ['left', 'small', 'muted'], { icon: 'globe' }),
+        button('choose', change, 'Change', 'subtle', { icon: 'monitor' }),
+        button('stop', end, 'Stop', 'danger', { icon: 'stop' }),
         { id: 'view', type: 'video', ...view },
       ];
     },
