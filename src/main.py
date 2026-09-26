@@ -65,7 +65,8 @@ def main() -> None:
             if show_preview:
                 pinching = {hand_id for hand_id, state in states.items() if state.is_pinching}
                 status = f"{fps.fps:4.1f} fps  hands={len(hands)}  primary={primary.hand_id}"
-                draw_preview(frame, hands, pinching, primary.hand_id, status)
+                ratios = {hand_id: state.pinch_ratio for hand_id, state in states.items()}
+                draw_preview(frame, hands, pinching, primary.hand_id, status, ratios)
                 cv2.imshow("SurfaceOS Hand Input", frame)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break

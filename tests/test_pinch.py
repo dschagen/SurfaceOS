@@ -20,6 +20,19 @@ class PinchTests(unittest.TestCase):
         self.assertEqual(detector.update(0.1).strength, 1.0)
         self.assertEqual(detector.update(2.0).strength, 0.0)
 
+    def test_brief_dropout_does_not_release(self):
+        detector = PinchDetector(0.25, 0.35, release_grace_s=0.1)
+        self.assertTrue(detector.update(0.1, now=0.0).is_pinching)
+        self.assertTrue(detector.update(0.9, now=0.03).is_pinching)   # thumb hidden for one frame
+        self.assertTrue(detector.update(0.1, now=0.06).is_pinching)   # back together
+        self.assertTrue(detector.update(0.9, now=0.12).is_pinching)   # apart again, timer restarts
+        self.assertFalse(detector.update(0.9, now=0.23).is_pinching)  # apart for 0.11 s: released
+
+    def test_without_time_release_is_immediate(self):
+        detector = PinchDetector(0.25, 0.35, release_grace_s=0.1)
+        detector.update(0.1)
+        self.assertFalse(detector.update(0.9).is_pinching)
+
     def test_invalid_thresholds(self):
         with self.assertRaises(ValueError):
             PinchDetector(0.4, 0.3)

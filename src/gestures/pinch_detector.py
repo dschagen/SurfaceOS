@@ -25,23 +25,40 @@ class PinchState:
 
 
 class PinchDetector:
-    """Pinch detection for one hand with hysteresis.
+    """Pinch detection for one hand with hysteresis and a release grace period.
 
     Two thresholds keep the state from flickering when the ratio hovers near one boundary.
+    The pinch ends only after the fingers have stayed apart for release_grace_s, so a brief
+    tracking dropout while the thumb is hidden behind the index finger does not break a drag.
     """
 
-    def __init__(self, start_ratio: float, end_ratio: float) -> None:
+    def __init__(self, start_ratio: float, end_ratio: float, release_grace_s: float = 0.0) -> None:
         if start_ratio >= end_ratio:
             raise ValueError("start_ratio must be smaller than end_ratio")
         self._start_ratio = start_ratio
         self._end_ratio = end_ratio
+        self._release_grace_s = release_grace_s
+        self._apart_since: float | None = None
         self.is_pinching = False
 
-    def update(self, ratio: float) -> PinchState:
-        if not self.is_pinching and ratio < self._start_ratio:
-            self.is_pinching = True
-        elif self.is_pinching and ratio > self._end_ratio:
-            self.is_pinching = False
+    def update(self, ratio: float, now: float | None = None) -> PinchState:
+        """now is required for the grace period; without it a release takes effect immediately."""
+        if not self.is_pinching:
+            if ratio < self._start_ratio:
+                self.is_pinching = True
+                self._apart_since = None
+        elif ratio > self._end_ratio:
+            if now is None or self._release_grace_s <= 0:
+                self.is_pinching = False
+            else:
+                if self._apart_since is None:
+                    self._apart_since = now
+                if now - self._apart_since >= self._release_grace_s:
+                    self.is_pinching = False
+                    self._apart_since = None
+        else:
+            # Fingers came back together within the grace period: the pinch never ended.
+            self._apart_since = None
 
         strength = clamp((OPEN_HAND_RATIO - ratio) / (OPEN_HAND_RATIO - self._start_ratio))
         return PinchState(is_pinching=self.is_pinching, ratio=ratio, strength=strength)
