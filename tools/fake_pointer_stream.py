@@ -12,14 +12,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from input.events import (POINTER_CANCEL, POINTER_DOWN, POINTER_MOVE,  # noqa: E402
-                          POINTER_UP, Pointer, SurfaceInputEvent)
+                          POINTER_UP, TWO_HAND_PINCH_START, TWO_HAND_PINCH_MOVE,
+                          TWO_HAND_PINCH_END, TWO_HAND_SINGLE_PINCH, Pointer, SurfaceInputEvent)
 from server.protocol import encode, hands_debug_message  # noqa: E402
 from server.server import SurfaceServer  # noqa: E402
 from settings import load_settings  # noqa: E402
-
-# The hand service no longer sends this one-hand event; this script still plays it until it is
-# updated for the two-hand events.
-DOUBLE_PINCH = "double_pinch"
 
 FRAME_S = 1 / 30
 
@@ -63,6 +60,10 @@ class Script:
         self.hold(0.15)
         self.send(POINTER_UP)
 
+    def rectangle(self, event_type: str, x: float, y: float, width: float, height: float) -> None:
+        self.server.publish(encode(SurfaceInputEvent(event_type, None, x, y, width, height)))
+        print(f"{event_type} x={x:.2f} y={y:.2f} width={width:.2f} height={height:.2f}")
+
     def run_once(self) -> None:
         print("-- wander")
         for step in range(90):
@@ -77,14 +78,13 @@ class Script:
         self.click()
         self.hold(0.8)
 
-        print("-- double pinch, then drag out a window")
-        self.move_to(0.2, 0.25, 0.6)
-        self.click()
-        self.hold(0.15)
-        self.send(DOUBLE_PINCH)
-        self.send(POINTER_DOWN)
-        self.move_to(0.55, 0.65, 1.2)
-        self.send(POINTER_UP)
+        print("-- two-hand action request, then a window rectangle if an action was selected")
+        self.send(TWO_HAND_SINGLE_PINCH)
+        self.rectangle(TWO_HAND_PINCH_START, 0.2, 0.3, 0.08, 0.07)
+        for i in range(1, 13):
+            self.rectangle(TWO_HAND_PINCH_MOVE, 0.2, 0.3, 0.08 + i * 0.025, 0.07 + i * 0.02)
+            time.sleep(FRAME_S)
+        self.rectangle(TWO_HAND_PINCH_END, 0.2, 0.3, 0.38, 0.31)
         self.hold(1.0)
 
         print("-- press, then lose tracking mid-drag")

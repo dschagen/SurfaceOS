@@ -1,6 +1,6 @@
 # SurfaceOS interaction flow — agreed direction
 
-This document defines the intended user experience. The existing mouse shell is an interaction sandbox and does not yet implement all of these states. Do not treat its current draw-first menu or content choices as product decisions.
+This document defines the intended user experience. The browser shell now implements its core states. Camera capture and projector optics still require hardware verification, and Ask AI needs a model service before it can answer.
 
 ## Terms
 
@@ -62,7 +62,7 @@ The shell should remain fully testable without a camera. Clicks can select actio
 
 ## Implementation boundaries and unresolved technical details
 
-- The current starter only implements an uncalibrated main canvas and basic window frames. It does not yet implement this calibration-first, action-before-draw flow, actual camera captures, digital rendering captures, or cross-surface geometry.
-- The shell, input teammate, and widget teammate must agree on a single versioned event/layout contract before changing shared messages. Hand gesture recognition belongs to input; the shell decides actions and target selection; widgets render inside windows.
+- The shell now implements calibration-first setup, action-before-draw, per-surface perspective transforms, camera-target alignment, and the window management states. Digital screenshot rendering and browser camera capture have implementation paths but still require browser and hardware validation. No AI model endpoint is connected.
+- The shell consumes the existing version 1 two-hand and pointer event names. Hand gesture recognition belongs to input; the shell decides actions and target selection; widgets render inside windows. Camera points are transformed by the shell after the guided four-target alignment, so the tracker must not also warp them.
 - Precise physical screenshots require mapping camera pixels to each calibrated surface. Projector correction and camera input mapping are related, but they are distinct transformations.
 - A reliable nonoverlap policy should be tested on each surface's logical coordinates, including after moving or resizing. The user-facing result should stay predictable when a proposed placement is invalid.
