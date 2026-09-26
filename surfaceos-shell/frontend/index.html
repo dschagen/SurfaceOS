@@ -1,48 +1,12 @@
 <!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#070d18" />
-    <title>SurfaceOS · Shell prototype</title>
-    <link rel="stylesheet" href="./styles/main.css" />
-    <!-- Widget renderer and apps live in the repository's frontend/ folder; serve from the repository root. -->
-    <link rel="stylesheet" href="../../frontend/widgets.css" />
-    <script type="module" src="./scripts/app.js"></script>
-    <script type="module" src="./scripts/hand-bubbles.js"></script>
-    <script type="module" src="./scripts/hand-bridge.js"></script>
-    <script type="module" src="../../frontend/shell-adapter.js"></script>
-  </head>
-  <body>
-    <main id="stage" aria-label="SurfaceOS projected canvas">
-      <div id="ambient" aria-hidden="true"></div>
-      <div id="windows"></div>
-      <div id="selection" hidden></div>
-      <div id="hand-cursor" hidden aria-hidden="true"></div>
-      <section id="welcome" class="welcome" aria-live="polite">
-        <span class="welcome-mark" aria-hidden="true">✦</span>
-        <h1>Your surface is ready.</h1>
-        <p>Double-click empty space, then drag to draw a window.</p>
-        <button id="welcome-create" type="button">Create a window <span aria-hidden="true">↗</span></button>
-      </section>
-      <div id="content-menu" class="content-menu" hidden role="dialog" aria-label="Choose window content">
-        <p class="menu-eyebrow">NEW WINDOW</p>
-        <h2>What goes here?</h2>
-        <button type="button" data-content="workspace"><span class="menu-icon">▦</span><span><strong>Workspace</strong><small>Start with an open canvas</small></span><span class="menu-arrow">↗</span></button>
-        <button type="button" data-content="notes"><span class="menu-icon">✎</span><span><strong>Notes</strong><small>A quick place to write</small></span><span class="menu-arrow">↗</span></button>
-        <button id="menu-cancel" type="button" class="menu-cancel">Cancel</button>
-      </div>
-      <footer class="chrome">
-        <div class="brand"><span class="brand-mark">✦</span><span>SURFACE<span class="brand-light">OS</span></span><span class="prototype">PROTOTYPE</span></div>
-        <div class="actions">
-          <span id="hand-status">Hand · connecting</span>
-          <span id="status" role="status">Ready · Double-click to create</span>
-          <button id="new-window" type="button" title="New window (N)">+ New window</button>
-          <button id="demo-layout" type="button" title="Load two example windows">Demo layout</button>
-          <button id="reset" type="button" title="Clear windows">Reset</button>
-          <button id="fullscreen" type="button" title="Toggle fullscreen (F)">⛶</button>
-        </div>
-      </footer>
-    </main>
-  </body>
-</html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SurfaceOS</title>
+<link rel="stylesheet" href="./styles/main.css"><link rel="stylesheet" href="../../frontend/widgets.css">
+<script type="module" src="./scripts/app.js"></script><script type="module" src="./scripts/hand-bubbles.js"></script><script type="module" src="./scripts/hand-bridge.js"></script><script type="module" src="../../frontend/shell-adapter.js"></script></head>
+<body><main id="stage" aria-label="SurfaceOS projected canvas">
+<div id="surfaces"></div><div id="outline" hidden></div><div id="cursor" hidden></div>
+<section id="setup" class="panel setup" aria-label="Surface calibration"><p class="eyebrow">SURFACEOS / SETUP</p><h1>Define surface <span id="surface-number">1</span></h1><p>Drag each corner onto the usable boundary of this physical surface. Keep all four corners on one flat plane.</p><div class="setup-actions"><button id="confirm-surface">Confirm surface</button><button id="finish-setup" hidden>Enter workspace</button><button id="add-surface" hidden>Add another surface</button></div><p id="setup-message" role="status">Move the four points, then confirm.</p></section>
+<div id="calibration" aria-label="Four calibration corners"></div>
+<section id="dialog" class="panel dialog" hidden role="dialog" aria-modal="true"></section>
+<nav id="actions" class="panel actions" hidden aria-label="Main actions"><button data-action="new">New Window</button><button data-action="screenshot">Screenshot</button><button data-action="ai">Ask AI</button></nav>
+<div id="surface-labels" hidden></div><footer><span>SURFACEOS</span><span id="status" role="status">Calibrate surface 1</span><span id="hand-status">Hand · connecting</span><button id="actions-button" hidden>Actions</button><button id="manage-button" hidden>Move / Resize</button><button id="close-button" hidden>Close</button><button id="fullscreen">Fullscreen</button></footer>
+</main></body></html>

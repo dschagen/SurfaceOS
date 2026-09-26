@@ -1,58 +1,41 @@
-# SurfaceOS shell starter
+# SurfaceOS shell
 
-Carter's part of the three-person SurfaceOS project: the projected browser shell, blank canvas, window creation, focus, movement, resizing, content choice, and app state. The hand tracker and widget renderer can plug into it through the adapters below. This is a standalone starter because the existing repository was not available in this workspace.
+This is the team repository's browser shell. It owns calibration, surface transforms, window placement and management, and mounts the apps from `frontend/` inside windows. It does not save an environment: reload or reset starts setup again.
 
-The agreed startup and gesture sequence is in [UX_FLOW.md](UX_FLOW.md). This mouse prototype predates that agreement: it starts after calibration and currently draws before choosing content. Use it to test window mechanics, not as the final product flow.
+## Run on Windows
 
-## Run
+From this repository, double-click `surfaceos-shell/start_windows.bat`. It serves the repository root and opens `http://localhost:8000/surfaceos-shell/frontend/`. Python 3 and Chrome or Edge are needed. Keep the server window open. Press **Fullscreen** to move the browser to the projector; extend the laptop display and put that browser window on the projector before calibrating.
 
-On Windows, double-click `start_windows.bat`. It serves the repository root and opens the shell in your browser. Python 3 must be installed. Keep the server window open while testing.
-
-Or, from the repository root on any system with Python 3:
+From a terminal at the repository root:
 
 ```bash
 python -m http.server 8000
 ```
 
-Open `http://localhost:8000/surfaceos-shell/frontend/` on the laptop or projector. The page loads the widget renderer and apps from the repository's `frontend/` folder, so it must be served from the repository root. For hand input, run `python src/main.py` (camera) or `python tools/fake_pointer_stream.py` (scripted); the footer shows `Hand · connected`. `?hand=off` disables the hand connection and `?hand=ws://host:port` points it elsewhere. While `debug.hand_bubbles` is `true` in `config/settings.json`, a labelled bubble follows each tracked hand at the exact position used for hit testing and fills in while pinching; set it to `false` for the demo, or add `?bubbles=off` to hide them in one browser. A hand pinch clicks shell buttons (Create a window, New window, Demo layout, Reset, fullscreen) on release over the same button. No npm install is required. Press **F** or the fullscreen icon to project fullscreen. Because the scripts are ES modules, opening `index.html` directly from the ZIP or as a `file://` URL is not the supported run path.
+Open `http://localhost:8000/surfaceos-shell/frontend/?hand=off` for a mouse-only run. The default URL tries to connect to the hand tracker at `ws://localhost:8765`; start it separately with `python src/main.py` after installing the dependencies in `requirements.txt`.
 
-## Mouse demo
+## Mouse walkthrough
 
-1. Double-click empty space, then drag a rectangle; or press **N** / **New window** and drag.
-2. Choose **Workspace** or **Notes**.
-3. Drag the window's top bar to move, or drag the bottom-right corner to resize.
-4. Add a second window. The notes are independently editable during this session. Refreshing starts a new blank session.
-5. **Demo layout** loads two sample windows; **Reset** clears the current windows after confirmation. **Esc** cancels drawing or content selection.
+1. On every load, drag the four numbered points to the physical boundary of Surface 1. Confirm. Choose **Add another surface** and repeat if a second area fits within the projector beam. Calibrated areas may not overlap in the projector frame.
+2. Choose **Enter workspace**, then **Continue with mouse**. The hand-alignment route instead asks you to pinch four projected targets per surface with the tracker. A plain mouse cannot supply camera-space samples.
+3. Choose **New Window**, then drag in a clear area inside one surface. Scroll the program list with the wheel and click **Pinch to confirm** to run the centered app.
+4. Choose **Move / Resize**; confirm, pick an operation, confirm it, then click the target window. Drag the window or one of the four resize corners. With multiple surfaces, Move asks whether to select a numbered destination.
+5. Choose **Close**, confirm, then click the target window. The **Actions** button and the three-action menu let you create another window.
 
-## Integration contract (v1)
+The tracker sends `two_hand_single_pinch` to request the main actions, `two_hand_double_pinch` for Move/Resize, and `thumbs_down` for Close. Gesture prompts ask for Yes/No. `two_hand_pinch_start/move/end` draws a new rectangle after an action is selected. Ordinary pointing, one-hand pinch selection, and scrolling do not ask for approval. Coordinates from the current Python tracker are camera-normalized; the optional four-target alignment maps those points to the projector before dispatching them to the shell.
 
-All outer coordinates are normalized to the **full projected canvas** (`0..1`), origin at top left. `surface_id` is currently `main`. The calibration layer must convert camera coordinates into this projected coordinate space; it should not send raw MediaPipe coordinates here.
+## Capture and AI paths
 
-The input teammate can call:
+Screenshot offers **Capture window** or **Capture physical area** when windows exist. A window capture renders its content to a PNG via the browser; some live video, remote content, and cross-origin assets may not render. A physical capture requests the browser camera, temporarily hides projected UI, and rectifies the selected region through the camera alignment. It may need ambient light and camera permission. The browser and Python tracker must see the same camera view; if the operating system does not allow both to open one camera, physical capture cannot run alongside tracking without a shared camera stream. If the desired physical region is occupied by another window, place the resulting screenshot in free space after capture.
 
-```js
-window.SurfaceOS.dispatchInput({ version: 1, type: 'double_pinch', x: 0.4, y: 0.4, source: 'hand' });
-window.SurfaceOS.dispatchInput({ version: 1, type: 'pointer_down', x: 0.2, y: 0.3, source: 'hand' });
-window.SurfaceOS.dispatchInput({ version: 1, type: 'pointer_move', x: 0.6, y: 0.7, source: 'hand' });
-window.SurfaceOS.dispatchInput({ version: 1, type: 'pointer_up', x: 0.6, y: 0.7, source: 'hand' });
-```
+Ask AI opens a question window with text, microphone, and camera controls. Speech uses the browser's speech recognition when available. Camera capture attaches a local image through the same physical capture path. **No model endpoint is connected**: Send gives a clear unavailable message and does not invent an answer.
 
-`pointer_cancel` releases a drag when tracking is lost. The source adapter emits one `pointer_down` per pinch and one `pointer_up` on release; it must not send repeated downs while held. Send events to `dispatchInput` from the WebSocket bridge when it exists. The mouse uses that same handler already. Hand interactions with a window's content dispatch `surfaceos:window-pointer` on `.widget-host`, with `window_id`, `type`, and coordinates normalized **inside that content area**. The fallback workspace button is hand clickable. Native text entry in Notes currently requires a keyboard.
+## Integration contract
 
-The widget teammate can register a renderer:
+`window.SurfaceOS.dispatchInput(event)` receives the existing version 1 WebSocket events. The shell retains `mountWidgetRenderer(renderer)`, `getState()`, and `reset()`. `getState()` returns surfaces and windows for debugging. A surface has `id`, `number`, four projector corners, its homography, and optional camera homography. A window has `id`, `surface_id`, logical `x/y/width/height`, and `content`. Each surface's window coordinates are 0..1 in its own rectangular workspace; pointer events on widget hosts remain content-local 0..1. The projection matrix warps the entire surface plane, including its apps, and the input path inversely maps camera points to the proper surface.
 
-```js
-window.SurfaceOS.mountWidgetRenderer({
-  renderLayout(layout, host, onAction) {
-    // Render layout.widgets safely inside host, without changing shell styles.
-    // Send e.g. onAction({version: 1, window_id: layout.window_id,
-    //   widget_id: 'notes', event: 'activate'}).
-  },
-});
-```
+The hand server speaks the same event names documented in `docs/input.md`. The shell calibrates incoming camera coordinates locally; do not also apply a second projector mapping upstream. `pointer_cancel` releases an active drag. Mouse and hand routes use the same shell state machine. `frontend/shell-adapter.js` still provides the app registry and renderer.
 
-The starter renders its own simple workspace card until a renderer mounts. `window.SurfaceOS.getState()` returns the current mode and shell window records. Window content and notes live only in memory; a new run begins blank. If the team already has a working message shape, agree on the v1 shape together before changing either producer or consumer.
+## Checks
 
-## Scope for this slice
-
-The intended full startup flow is: calibrate a surface, add any other surfaces within the same projector's field, then enter a blank workspace. Calibrate again on every launch or after moving the device. This shell prototype begins after that setup stage; it does not yet draw corrected pixels onto separately angled surfaces. Its `surface_id` field leaves room for that integration after the surface calibration contract is agreed. The browser UI can be exercised without the projector, camera, backend, or widget renderer. No capture or AI menu item is shown until those actions work end to end.
+Run `npm test --prefix surfaceos-shell` from the repository root for perspective and overlap geometry checks. On a laptop with Edge or Chrome and the `websockets` Python package, run `python tools/integration_smoke.py` for a browser walk through calibration, synthetic hand alignment, app selection, and move. Hardware checks must verify the four projected corners, center alignment, real hand targets, camera crop, and optics on the actual surfaces.

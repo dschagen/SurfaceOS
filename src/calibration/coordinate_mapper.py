@@ -2,11 +2,10 @@ from utils.geometry import Point
 
 
 class CoordinateMapper:
-    """Converts camera-normalized points into canvas-normalized points and back.
+    """Applies an optional horizontal mirror to camera-normalized points.
 
-    Canvas coordinates are 0-1 across the full projected canvas, as the integration
-    contract requires. Until calibration exists this is only an optional horizontal
-    mirror; calibration will replace it with a homography without changing any callers.
+    These coordinates remain in camera space. The browser shell's guided four-target
+    alignment converts them into projector coordinates for each calibrated surface.
     """
 
     def __init__(self, mirror_x: bool) -> None:
