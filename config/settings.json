@@ -1,0 +1,36 @@
+{
+  "camera": {
+    "index": 1,
+    "width": null,
+    "height": null
+  },
+  "tracking": {
+    "max_hands": 2,
+    "identity_match_distance": 0.2
+  },
+  "pinch": {
+    "start_ratio": 0.25,
+    "end_ratio": 0.35
+  },
+  "double_pinch": {
+    "max_interval_s": 0.45,
+    "max_distance": 0.08
+  },
+  "static_gestures": {
+    "min_score": 0.6,
+    "stable_frames": 5
+  },
+  "pointer": {
+    "smoothing": 0.5
+  },
+  "surface": {
+    "mirror_x": false
+  },
+  "server": {
+    "host": "localhost",
+    "port": 8765
+  },
+  "debug": {
+    "show_preview": true
+  }
+}

@@ -1,76 +1,66 @@
-import time
+from pathlib import Path
 
 import cv2
 import mediapipe as mp
 from mediapipe.tasks import python as mp_tasks
 from mediapipe.tasks.python import vision
 
-import config
-from utils.geometry import distance
-from vision.hand_data import INDEX_TIP, MIDDLE_KNUCKLE, THUMB_TIP, WRIST, HandData
+from utils.timing import monotonic_ms
+from vision.hand_data import HandData
+from vision.hand_identity import HandIdentifier
 
 
 class HandTracker:
-    """Reads camera frames and returns raw hand data. Does not decide what gestures mean."""
+    """Runs MediaPipe on camera frames and returns HandData. Does not decide what gestures mean."""
 
-    def __init__(self) -> None:
-        self.camera = cv2.VideoCapture(config.CAMERA_INDEX)
-        if not self.camera.isOpened():
-            raise RuntimeError(f"Could not open camera {config.CAMERA_INDEX}")
-
+    def __init__(self, model_path: Path, max_hands: int, identity_match_distance: float) -> None:
         options = vision.GestureRecognizerOptions(
-            base_options=mp_tasks.BaseOptions(model_asset_path=str(config.MODEL_PATH)),
+            base_options=mp_tasks.BaseOptions(model_asset_path=str(model_path)),
             running_mode=vision.RunningMode.VIDEO,
-            num_hands=config.MAX_HANDS,
+            num_hands=max_hands,
         )
-        self.recognizer = vision.GestureRecognizer.create_from_options(options)
-        self.last_timestamp_ms = -1
+        self._recognizer = vision.GestureRecognizer.create_from_options(options)
+        self._identifier = HandIdentifier(identity_match_distance)
+        self._last_timestamp_ms = -1
 
-    def read(self):
-        """Returns (frame, hands). frame is None if the camera stopped delivering images."""
-        success, frame = self.camera.read()
-        if not success:
-            return None, []
-
+    def process(self, frame) -> list[HandData]:
         height, width = frame.shape[:2]
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
 
         # VIDEO mode requires strictly increasing timestamps.
-        timestamp_ms = max(int(time.monotonic() * 1000), self.last_timestamp_ms + 1)
-        self.last_timestamp_ms = timestamp_ms
-        result = self.recognizer.recognize_for_video(image, timestamp_ms)
+        timestamp_ms = max(monotonic_ms(), self._last_timestamp_ms + 1)
+        self._last_timestamp_ms = timestamp_ms
+        result = self._recognizer.recognize_for_video(image, timestamp_ms)
+
+        normalized_sets = []
+        for landmarks in result.hand_landmarks:
+            normalized_sets.append([(lm.x, lm.y) for lm in landmarks])
+
+        ids = self._identifier.assign([points[0] for points in normalized_sets])
 
         hands = []
-        for i, landmarks in enumerate(result.hand_landmarks):
-            points = [(int(lm.x * width), int(lm.y * height)) for lm in landmarks]
-
-            # Dividing by hand size makes the pinch work at any distance from the camera.
-            hand_size = distance(points[WRIST], points[MIDDLE_KNUCKLE])
-            pinch_ratio = distance(points[THUMB_TIP], points[INDEX_TIP]) / max(hand_size, 1.0)
-
-            tip_x = landmarks[INDEX_TIP].x
-            if config.MIRROR_X:
-                tip_x = 1.0 - tip_x
-
-            gesture = "None"
-            if i < len(result.gestures) and result.gestures[i]:
-                gesture = result.gestures[i][0].category_name
-
-            handedness = "Unknown"
+        for i, (hand_id, normalized) in enumerate(zip(ids, normalized_sets)):
+            handedness, confidence = "Unknown", 0.0
             if i < len(result.handedness) and result.handedness[i]:
-                handedness = result.handedness[i][0].category_name
+                category = result.handedness[i][0]
+                handedness, confidence = category.category_name, category.score
+
+            gesture, gesture_score = "None", 0.0
+            if i < len(result.gestures) and result.gestures[i]:
+                category = result.gestures[i][0]
+                gesture, gesture_score = category.category_name, category.score
 
             hands.append(HandData(
-                pixel_points=points,
-                index_tip=(tip_x, landmarks[INDEX_TIP].y),
-                pinch_ratio=pinch_ratio,
-                gesture=gesture,
+                hand_id=hand_id,
                 handedness=handedness,
+                confidence=confidence,
+                normalized_landmarks=normalized,
+                pixel_landmarks=[(int(x * width), int(y * height)) for x, y in normalized],
+                static_gesture=gesture,
+                static_gesture_score=gesture_score,
             ))
-
-        return frame, hands
+        return hands
 
     def close(self) -> None:
-        self.recognizer.close()
-        self.camera.release()
+        self._recognizer.close()

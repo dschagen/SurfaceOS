@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SurfaceOS pointer viewer</title>
+<style>
+  :root {
+    --ink: #13233b;
+    --grid: rgba(160, 200, 255, 0.08);
+    --grid-major: rgba(160, 200, 255, 0.16);
+    --paper: #eef3fa;
+    --cursor: #8fdcff;
+    --press: #ffb347;
+    --warn: #ff7a7a;
+    --muted: #7d93b2;
+  }
+
+  * { box-sizing: border-box; margin: 0; }
+
+  html, body { height: 100%; overflow: hidden; }
+
+  body {
+    background-color: var(--ink);
+    background-image:
+      linear-gradient(var(--grid-major) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-major) 1px, transparent 1px),
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 120px 120px, 120px 120px, 24px 24px, 24px 24px;
+    color: var(--paper);
+    font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  }
+
+  #trail { position: fixed; inset: 0; width: 100%; height: 100%; }
+
+  #panel {
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    width: min(340px, calc(100% - 40px));
+    padding: 16px 18px;
+    border-radius: 14px;
+    background: rgba(8, 16, 30, 0.8);
+    font-size: 15px;
+    line-height: 1.5;
+  }
+
+  #connection { font-weight: 600; }
+  #connection.off { color: var(--warn); }
+
+  #state { color: var(--muted); margin-bottom: 10px; }
+
+  #log { list-style: none; padding: 0; font-variant-numeric: tabular-nums; }
+  #log li { padding: 2px 0; }
+  #log .pointer_down { color: var(--press); }
+  #log .pointer_cancel, #log .invalid { color: var(--warn); }
+  #log .double_pinch { color: var(--cursor); font-weight: 600; }
+
+  #cursor {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 40px;
+    height: 40px;
+    margin: -20px 0 0 -20px;
+    border: 4px solid var(--cursor);
+    border-radius: 50%;
+    pointer-events: none;
+    opacity: 0;
+  }
+  #cursor.visible { opacity: 1; }
+  #cursor.down { background: var(--press); border-color: var(--press); }
+
+  .ripple {
+    position: fixed;
+    width: 20px;
+    height: 20px;
+    margin: -10px 0 0 -10px;
+    border: 3px solid var(--cursor);
+    border-radius: 50%;
+    pointer-events: none;
+    animation: ripple 700ms ease-out forwards;
+  }
+
+  @keyframes ripple {
+    to { transform: scale(8); opacity: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ripple { animation: none; opacity: 0; }
+  }
+</style>
+</head>
+<body>
+  <canvas id="trail"></canvas>
+  <div id="panel">
+    <div id="connection" class="off">Waiting for hand input on ws://localhost:8765</div>
+    <div id="state">No pointer</div>
+    <ul id="log"></ul>
+  </div>
+  <div id="cursor"></div>
+
+<script>
+  // Developer view of the input contract: every message is validated and shown as the shell would receive it.
+  const SERVER_URL = "ws://localhost:8765";
+  const TYPES = ["pointer_move", "pointer_down", "pointer_up", "pointer_cancel", "double_pinch"];
+  const LOG_LENGTH = 14;
+
+  const canvas = document.getElementById("trail");
+  const context = canvas.getContext("2d");
+  const cursor = document.getElementById("cursor");
+  const connection = document.getElementById("connection");
+  const stateText = document.getElementById("state");
+  const log = document.getElementById("log");
+
+  let isDown = false;
+  let last = null;
+  let moveCount = 0;
+  let moveWindowStart = performance.now();
+  let moveRate = 0;
+
+  function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  function addLog(text, className) {
+    const item = document.createElement("li");
+    item.textContent = text;
+    item.className = className;
+    log.prepend(item);
+    while (log.children.length > LOG_LENGTH) log.lastChild.remove();
+  }
+
+  function validate(message) {
+    if (message.version !== 1) return "version must be 1";
+    if (!TYPES.includes(message.type)) return `unknown type ${message.type}`;
+    for (const key of ["x", "y"]) {
+      if (typeof message[key] !== "number" || message[key] < 0 || message[key] > 1) {
+        return `${key} must be a number from 0 to 1`;
+      }
+    }
+    if (message.source !== "hand" && message.source !== "mouse") return "source must be hand or mouse";
+    return null;
+  }
+
+  function ripple(x, y) {
+    const ring = document.createElement("div");
+    ring.className = "ripple";
+    ring.style.left = `${x}px`;
+    ring.style.top = `${y}px`;
+    document.body.appendChild(ring);
+    setTimeout(() => ring.remove(), 800);
+  }
+
+  function handle(message) {
+    const problem = validate(message);
+    if (problem) {
+      addLog(`Rejected message: ${problem}`, "invalid");
+      console.warn("Invalid input message", message, problem);
+      return;
+    }
+
+    const x = message.x * canvas.width;
+    const y = message.y * canvas.height;
+
+    if (message.type === "pointer_move") {
+      moveCount += 1;
+      if (last) {
+        // The trail is drawn only while pressed, which shows drags clearly.
+        context.strokeStyle = isDown ? "rgba(255, 179, 71, 0.8)" : "rgba(143, 220, 255, 0.12)";
+        context.lineWidth = isDown ? 4 : 2;
+        context.beginPath();
+        context.moveTo(last.x, last.y);
+        context.lineTo(x, y);
+        context.stroke();
+      }
+      last = { x, y };
+    } else {
+      addLog(`${message.type}  ${message.x.toFixed(2)}, ${message.y.toFixed(2)}  (${message.source})`,
+             message.type);
+    }
+
+    if (message.type === "pointer_down") isDown = true;
+    if (message.type === "pointer_up") isDown = false;
+    if (message.type === "double_pinch") ripple(x, y);
+    if (message.type === "pointer_cancel") {
+      isDown = false;
+      last = null;
+    }
+
+    cursor.style.transform = `translate(${x}px, ${y}px)`;
+    cursor.classList.toggle("visible", message.type !== "pointer_cancel");
+    cursor.classList.toggle("down", isDown);
+  }
+
+  setInterval(() => {
+    const now = performance.now();
+    moveRate = Math.round(moveCount * 1000 / (now - moveWindowStart));
+    moveCount = 0;
+    moveWindowStart = now;
+    stateText.textContent = moveRate > 0
+      ? `${moveRate} moves per second, ${isDown ? "pressed" : "released"}`
+      : "No pointer";
+    // Fade the trail slowly so recent gestures stay readable.
+    context.fillStyle = "rgba(19, 35, 59, 0.08)";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+  }, 500);
+
+  function connect() {
+    const socket = new WebSocket(SERVER_URL);
+    socket.onopen = () => {
+      connection.textContent = "Connected to hand input";
+      connection.classList.remove("off");
+    };
+    socket.onmessage = (event) => {
+      let message;
+      try {
+        message = JSON.parse(event.data);
+      } catch {
+        addLog("Rejected message: not valid JSON", "invalid");
+        return;
+      }
+      handle(message);
+    };
+    socket.onclose = () => {
+      connection.textContent = "Hand input not running. Retrying every second.";
+      connection.classList.add("off");
+      cursor.classList.remove("visible");
+      isDown = false;
+      last = null;
+      setTimeout(connect, 1000);
+    };
+  }
+
+  connect();
+</script>
+</body>
+</html>
