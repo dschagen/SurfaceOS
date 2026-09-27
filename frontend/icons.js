@@ -14,6 +14,7 @@ export const ICONS = {
   'volume-down': [speaker, ['path', { d: 'M15.5 9.5a3.5 3.5 0 0 1 0 5' }]],
   'volume-up': [speaker, ['path', { d: 'M15.5 9.5a3.5 3.5 0 0 1 0 5' }], ['path', { d: 'M18.5 6.5a7.5 7.5 0 0 1 0 11' }]],
   mute: [speaker, ['path', { d: 'm16 9.5 5 5m0-5-5 5' }]],
+  camera: [['path', { d: 'M3.5 8.5a2 2 0 0 1 2-2h2.5l1.5-2.5h5l1.5 2.5h2.5a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z' }], ['circle', { cx: 12, cy: 13, r: 3.5 }]],
   mic: [['rect', { x: 9, y: 2.5, width: 6, height: 11.5, rx: 3 }], ['path', { d: 'M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5v4' }]],
   check: [['path', { d: 'm4.5 12.5 5 5 10-11' }]],
   x: [['path', { d: 'M6 6l12 12M18 6 6 18' }]],

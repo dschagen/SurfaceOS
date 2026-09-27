@@ -34,6 +34,7 @@
 .surfaceos-app-music { --sw-accent: #ff6fb1; }
 .surfaceos-app-weather { --sw-accent: #62b6ff; }
 .surfaceos-app-youtube { --sw-accent: #ff4e45; }
+.surfaceos-app-explore { --sw-accent: #7ee0a1; }
 
 /* ---------- Base widgets ---------- */
 
@@ -100,6 +101,8 @@
 .surfaceos-widgets .surfaceos-v-right { justify-content: flex-end; text-align: right; }
 .surfaceos-widgets .surfaceos-v-top { align-items: flex-start; padding-top: 0.4em; }
 .surfaceos-widgets .surfaceos-v-pre { white-space: pre-wrap; }
+/* Long answers scroll inside their box (mouse wheel, or the shell's hand scroll gesture). */
+.surfaceos-widgets .surfaceos-v-scroll { display: block; overflow-y: auto; white-space: pre-wrap; text-align: left; padding: 0.5em 0.8em; background: var(--sw-surface); border-radius: 0.6em; user-select: text; }
 /* Keeps the newest lines of long text visible by clipping from the top. */
 .surfaceos-widgets .surfaceos-v-tail { flex-direction: column; justify-content: flex-end; align-items: stretch; text-align: left; padding: 0.5em 0.8em; }
 .surfaceos-widgets .surfaceos-v-mono { font-family: "Cascadia Mono", Consolas, monospace; font-variant-numeric: tabular-nums; letter-spacing: 0; }

@@ -93,7 +93,8 @@
     box.style.height = `${height}px`;
     document.body.append(box);
     const warnings = [];
-    const app = mountApp(box, { type, windowId: `test-${type}`, dictation: fakeDictation, warn: (m) => warnings.push(m) });
+    // Apps that use the AI service get an offline stand-in, so these tests never open a connection.
+    const app = mountApp(box, { type, windowId: `test-${type}`, dictation: fakeDictation, services: { ai: fakeAI("closed") }, warn: (m) => warnings.push(m) });
     return { box, app, warnings };
   }
 
@@ -401,6 +402,113 @@
     assertEqual(second.calls.includes("play"), false, "second window untouched");
     one.app.destroy();
     two.app.destroy();
+  });
+
+  // ---- Explore Object (fake AI client; no network) ----
+
+  function fakeAI(status = "open") {
+    const client = {
+      status, controls: [], requests: [], listeners: new Map(), statusListeners: new Set(), n: 0,
+      onStatus(fn) { this.statusListeners.add(fn); return () => this.statusListeners.delete(fn); },
+      subscribe(id, fn) { this.listeners.set(id, fn); return () => this.listeners.delete(id); },
+      newRequestId(id) { this.n += 1; return `${id}-r${this.n}`; },
+      control(type, id, fields = {}) { this.controls.push({ type, window_id: id, ...fields }); return this.status === "open"; },
+      request(id, fields, requestId = this.newRequestId(id)) {
+        let resolve;
+        const promise = new Promise((r) => { resolve = r; });
+        this.requests.push({ window_id: id, request_id: requestId, ...fields, resolve });
+        return { requestId, promise };
+      },
+      forget() {},
+      emit(message) { this.listeners.get(message.window_id)?.({ version: 1, ...message }); },
+    };
+    return client;
+  }
+
+  function mountExplore(ai, width = 820, height = 520) {
+    const box = document.createElement("div");
+    box.className = "sandbox";
+    box.style.width = `${width}px`;
+    box.style.height = `${height}px`;
+    document.body.append(box);
+    const warnings = [];
+    const app = mountApp(box, { type: "explore", windowId: "win-e", dictation: fakeDictation, services: { ai }, warn: (m) => warnings.push(m) });
+    return { app, box, warnings };
+  }
+
+  const PIXEL = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==";
+
+  function captureAndIdentify(ai, fields = {}) {
+    ai.emit({ type: "explore.capture", window_id: "win-e", request_id: "auto-1", capture_id: "capture-1", image: PIXEL, trigger: "auto" });
+    ai.emit({ type: "ai.response", window_id: "win-e", request_id: "auto-1", ok: true, task: "identify", model: "gemini-test", provider: "gemini",
+      identification: { label: "coffee mug", confidence: "high", uncertain: false, object_present: true, summary: "A ceramic mug.", ...fields } });
+  }
+
+  await test("Explore Object watches, then asks before any web lookup", async () => {
+    const ai = fakeAI();
+    const { app, box, warnings } = mountExplore(ai);
+    assertEqual(ai.controls[0].type, "explore.watch", "starts watching when mounted");
+    captureAndIdentify(ai); await tick();
+    assertEqual(textOf(box, "identity"), "coffee mug");
+    assertEqual(textOf(box, "question"), "Analyze further?");
+    assertEqual(box.querySelector('[data-widget-id="photo"] img')?.getAttribute("src"), PIXEL, "captured photo shown");
+    assertEqual(ai.requests.length, 0, "no lookup before Yes");
+    assertEqual(textOf(box, "footer"), "Live answer from Gemini (gemini-test)");
+    press(app, box, "no"); await tick();
+    assertEqual(ai.controls.at(-1).type, "explore.dismiss", "No returns to watching");
+    assertEqual(textOf(box, "heading"), "Place an object in the camera area");
+    assertEqual(ai.requests.length, 0);
+    assertEqual(warnings, []);
+    app.destroy();
+    assertEqual(ai.controls.at(-1).type, "explore.release", "closing the window releases the camera area");
+  });
+
+  await test("Explore Object Yes looks it up and follow-ups keep the image and identity", async () => {
+    const ai = fakeAI();
+    const { app, box, warnings } = mountExplore(ai);
+    captureAndIdentify(ai); await tick();
+    press(app, box, "yes"); await tick();
+    const lookup = ai.requests[0];
+    assertEqual([lookup.task, lookup.capture_id, lookup.subject, lookup.grounding], ["ask", "capture-1", "coffee mug", true]);
+    lookup.resolve({ ok: true, request_id: lookup.request_id, window_id: "win-e", text: "A mug holds hot drinks.", model: "gemini-test",
+      sources: [{ title: "Mugs", url: "https://example.com/mugs" }], grounded: true });
+    await tick(); await tick();
+    assertEqual(textOf(box, "details").startsWith("A mug holds hot drinks."), true);
+    assertEqual(textOf(box, "source-0"), "example.com", "source link shown");
+    press(app, box, "suggest-0"); await tick();
+    const follow = ai.requests[1];
+    assertEqual([follow.prompt, follow.capture_id, follow.subject], ["What is it made of?", "capture-1", "coffee mug"]);
+    assertEqual(follow.context, [{ role: "model", text: "A mug holds hot drinks." }], "earlier answer passed as context");
+    ai.emit({ type: "ai.response", window_id: "win-e", request_id: "old-request", ok: false, task: "ask", error: { code: "api_error", message: "stale" } });
+    await tick(); await tick();
+    assertEqual(textOf(box, "details").includes("stale"), false, "reply for another request ignored");
+    follow.resolve({ ok: true, request_id: follow.request_id, window_id: "win-e", text: "Ceramic.", sources: [], grounded: false });
+    await tick(); await tick();
+    assertEqual(textOf(box, "details").includes("You: What is it made of?" + String.fromCharCode(10) + "Gemini: Ceramic."), true);
+    assertEqual(warnings, []);
+    app.destroy();
+  });
+
+  await test("Explore Object shows uncertainty, errors, object leaving, and offline state", async () => {
+    const ai = fakeAI();
+    const { app, box } = mountExplore(ai);
+    captureAndIdentify(ai, { uncertain: true, confidence: "low", label: "stapler", summary: "Hard to see." }); await tick();
+    assertEqual(textOf(box, "identity"), "Maybe: stapler");
+    press(app, box, "yes"); await tick();
+    assertEqual(ai.requests[0].subject, undefined, "an uncertain label is not passed as fact");
+    ai.requests[0].resolve({ ok: false, request_id: ai.requests[0].request_id, window_id: "win-e", error: { code: "timeout", message: "Gemini did not answer within 30 seconds." } });
+    await tick(); await tick();
+    assertEqual(textOf(box, "body"), "Gemini did not answer within 30 seconds.");
+    ai.emit({ type: "explore.object_left", window_id: "win-e", capture_id: "capture-1" }); await tick();
+    assertEqual(textOf(box, "footer"), "The object left the camera area. Its photo stays here.");
+    press(app, box, "analyze"); await tick();
+    assertEqual(ai.controls.at(-1).type, "explore.analyze_frame");
+    assertEqual(textOf(box, "heading"), "Identifying with Gemini...");
+    app.destroy();
+    const offline = mountExplore(fakeAI("closed"));
+    assertEqual(textOf(offline.box, "heading"), "AI service offline");
+    assertEqual(offline.box.querySelector('[data-widget-id="analyze"]').classList.contains("surfaceos-widget--disabled"), true);
+    offline.app.destroy();
   });
 
   // ---- Every app renders valid layouts at several window shapes ----
