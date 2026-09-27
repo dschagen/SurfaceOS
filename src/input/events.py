@@ -1,8 +1,7 @@
 from dataclasses import dataclass
 
-from gestures.two_hand import (TWO_HAND_DOUBLE_PINCH, TWO_HAND_PINCH_CANCEL,  # noqa: F401
-                               TWO_HAND_PINCH_END, TWO_HAND_PINCH_MOVE, TWO_HAND_PINCH_START,
-                               TWO_HAND_SINGLE_PINCH)
+from gestures.two_hand import (TWO_HAND_HOLD, TWO_HAND_PINCH_CANCEL,  # noqa: F401
+                               TWO_HAND_PINCH_END, TWO_HAND_PINCH_MOVE, TWO_HAND_PINCH_START)
 
 # Names match the shared integration contract (UX_FLOW.md and docs/input.md).
 POINTER_MOVE = "pointer_move"
@@ -11,6 +10,9 @@ POINTER_UP = "pointer_up"
 POINTER_CANCEL = "pointer_cancel"
 SCROLL = "scroll"
 THUMBS_DOWN = "thumbs_down"
+PEACE_SIGN = "peace_sign"
+# Progress of whichever gesture hold is building up, so the cursor can fill.
+HOLD_PROGRESS = "hold_progress"
 
 # Events that belong to the single contract pointer and follow the primary hand.
 POINTER_EVENTS = {POINTER_MOVE, POINTER_DOWN, POINTER_UP, POINTER_CANCEL, SCROLL}
@@ -46,3 +48,5 @@ class SurfaceInputEvent:
     height: float | None = None
     # Finger movement for scroll; positive means the finger moved down.
     dy: float | None = None
+    # 0 to 1, for hold_progress.
+    progress: float | None = None

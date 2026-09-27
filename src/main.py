@@ -5,7 +5,7 @@ import cv2
 from calibration.coordinate_mapper import CoordinateMapper
 from calibration.marker_calibration import MarkerCalibration, parse_request
 from gestures.gesture_detector import GestureDetector
-from input.events import POINTER_MOVE, SCROLL, TWO_HAND_PINCH_MOVE
+from input.events import HOLD_PROGRESS, POINTER_MOVE, SCROLL, TWO_HAND_PINCH_MOVE
 from input.interaction_state import InteractionState
 from server.protocol import PrimaryPointer, hands_debug_message, primary_messages
 from server.server import SurfaceServer
@@ -72,8 +72,8 @@ def main() -> None:
             sending_hand = primary.hand_id
             for message in primary_messages(input_events, primary, pointers):
                 server.publish(message)
-                # Moves and scrolls arrive every frame, so only discrete events are printed.
-                if message["type"] not in (POINTER_MOVE, SCROLL, TWO_HAND_PINCH_MOVE):
+                # Moves, scrolls and hold progress arrive every frame, so only discrete events are printed.
+                if message["type"] not in (POINTER_MOVE, SCROLL, TWO_HAND_PINCH_MOVE, HOLD_PROGRESS):
                     details = " ".join(f"{key}={value}" for key, value in message.items()
                                        if key not in ("version", "type", "source"))
                     print(f"{message['type']} {details}")

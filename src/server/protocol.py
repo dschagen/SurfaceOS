@@ -37,6 +37,8 @@ def encode(event: SurfaceInputEvent, source: str = SOURCE_HAND) -> dict:
             message[field] = round(clamp(value), 4)
     if event.dy is not None:
         message["dy"] = round(event.dy, 4)
+    if event.progress is not None:
+        message["progress"] = round(clamp(event.progress), 2)
     message["source"] = source
     return message
 
@@ -64,7 +66,7 @@ def primary_messages(events: list[SurfaceInputEvent], primary: PrimaryPointer,
     """Encodes this frame's events, then updates the primary choice.
 
     Pointer and scroll events are sent only for the primary hand. Gesture events such as
-    thumbs_down and all two-hand events are sent whichever hand made them. Selection happens
+    thumbs_down, peace_sign and hold_progress, and all two-hand events, are sent whichever hand made them. Selection happens
     after encoding so a lost primary hand still delivers its pointer_cancel.
     """
     messages = [encode(event) for event in events

@@ -8,6 +8,8 @@ const dialog=$('dialog'), actions=$('actions'), outline=$('outline'), cursor=$('
 let surfaces=[], draft=[[.11,.22],[.89,.22],[.89,.83],[.11,.83]], windows=[], nextId=1;
 let phase='calibration', mode='idle', action=null, interaction=null, operation=null, selectedId=null;
 let activeId=null, renderer=null, sourceId=null, destinationId=null, cameraStep=null, pendingImage=null;
+// Surface numbers are never reused after a close. Hand alignment covers surfaces from alignStart on.
+let nextSurface=1, alignStart=0;
 const HOLD_S=DWELL_MS/1000;
 // Surface-local positions of the fingertip target C and the verification target OK.
 const FINGER_POINT=[.5,.5],CHECK_POINT=[.5,.22];
@@ -82,31 +84,37 @@ function setupPreview(){
     calibration.append(marker);
   }else calibration.hidden=true;
 }
+// Corner dragging for a new surface, at startup or from New Surface. Existing windows stay.
 function showCalibration(){
-  phase='calibration';setup.hidden=false;actions.hidden=true;labels.hidden=true;windows=[];
-  $('surface-number').textContent=String(surfaces.length+1);
+  phase='calibration';setup.hidden=false;actions.hidden=true;labels.hidden=true;
+  for(const id of ['actions-button','manage-button','close-button'])$(id).hidden=true;
+  $('surface-number').textContent=String(nextSurface);
   setup.querySelector('h1').firstChild.textContent='Define surface ';
   setup.querySelector('p:not(.eyebrow)').textContent='Drag each corner onto the usable boundary of this physical surface. Keep all four corners on one flat plane.';
-  $('confirm-surface').hidden=false;$('add-surface').hidden=true;$('finish-setup').hidden=true;
+  $('confirm-surface').hidden=false;$('add-surface').hidden=true;
+  $('finish-setup').hidden=!surfaces.length;
+  $('finish-setup').textContent=surfaces.length>alignStart?'Done adding surfaces':'Cancel new surface';
   $('accept-alignment').hidden=true;$('retry-alignment').hidden=true;
-  setSetupMessage('Move the four points, then confirm.');status(`Calibrate surface ${surfaces.length+1}`);
+  setSetupMessage('Move the four points with the mouse, then confirm.');status(`Calibrate surface ${nextSurface}`);
   setupPreview();render();
 }
 function confirmSurface(){
   if(!quadValid(draft)){setSetupMessage('Corners must form a large, convex quadrilateral in order 1, 2, 3, 4.');return;}
   if(surfaces.some(s=>polygonsOverlap(s.corners,draft))){setSetupMessage('This area overlaps an existing surface in the projector image. Move the points apart.');return;}
   const corners=draft.map(p=>[...p]);
-  surfaces.push({id:`surface-${surfaces.length+1}`,number:surfaces.length+1,corners,h:homography(corners),camera:null});
+  surfaces.push({id:`surface-${nextSurface}`,number:nextSurface,corners,h:homography(corners),camera:null});
+  nextSurface++;
   phase='choice';setupPreview();render();
   setup.querySelector('h1').firstChild.textContent='Surface ';
+  $('surface-number').textContent=String(nextSurface-1);
   setup.querySelector('p:not(.eyebrow)').textContent='Boundary saved for this session. Add another physical area inside the projector beam, or finish setup.';
-  $('confirm-surface').hidden=true;$('add-surface').hidden=false;$('finish-setup').hidden=false;
+  $('confirm-surface').hidden=true;$('add-surface').hidden=false;$('finish-setup').hidden=false;$('finish-setup').textContent='Finish setup';
   setSetupMessage('Projector geometry is mapped. Camera input alignment comes next.');
 }
 function alignmentText(title,description){
   setup.hidden=false;actions.hidden=true;
   setup.querySelector('h1').firstChild.textContent=title;
-  $('surface-number').textContent=String(cameraStep.surface+1);
+  $('surface-number').textContent=String(surfaces[cameraStep.surface].number);
   setup.querySelector('p:not(.eyebrow)').textContent=description;
 }
 function alignmentButtons({skip=false,accept=false,retry=false}){
@@ -114,7 +122,7 @@ function alignmentButtons({skip=false,accept=false,retry=false}){
   $('finish-setup').hidden=!skip;$('finish-setup').textContent='Skip hand alignment';
   $('accept-alignment').hidden=!accept;$('retry-alignment').hidden=!retry;
 }
-function startCameraAlignment(){cameraStep={surface:0};runMarkers();}
+function startCameraAlignment(){cameraStep={surface:alignStart};runMarkers();}
 // Projects a marker grid on the current surface and asks the tracker to find it in the camera image.
 async function runMarkers(){
   const s=surfaces[cameraStep.surface],{width,height}=stageSize(),token=++markerToken;
@@ -211,8 +219,8 @@ function acceptCameraAlignment(){
   runMarkers();
 }
 function finishSetup(){
-  if(phase==='choice'){
-    prompt('Align hand input?',`The camera reads projected markers on each surface, then you hold your fingertip on C and OK for ${HOLD_S} seconds each. Or continue with a mouse.`,[
+  if((phase==='choice'||phase==='calibration')&&surfaces.length>alignStart){
+    prompt('Align hand input?',`The camera reads projected markers on each new surface, then you hold your fingertip on C and OK for ${HOLD_S} seconds each. Or continue with a mouse.`,[
       ['Align hands',startCameraAlignment],['Continue with mouse',enterWorkspace]]);
   }else enterWorkspace();
 }
@@ -220,8 +228,23 @@ function enterWorkspace(){
   if(cameraStep){clearTimeout(cameraStep.timer);markerToken++;}
   stage.classList.remove('marker-capture');cursor.hidden=true;
   phase='workspace';mode='idle';setup.hidden=true;calibration.hidden=true;actions.hidden=false;closePrompt();
-  $('actions-button').hidden=false;$('manage-button').hidden=false;$('close-button').hidden=false;
-  $('finish-setup').textContent='Enter workspace';render();status('Choose New Window, Screenshot, or Ask AI');
+  for(const id of ['actions-button','manage-button','close-button'])$(id).hidden=false;
+  alignStart=surfaces.length;render();status('Choose Make Window, Screenshot, or New Surface');
+}
+// New Surface repeats the startup steps for more surfaces; existing surfaces and windows stay.
+function startNewSurface(){
+  if(phase!=='workspace')return;
+  cancel();alignStart=surfaces.length;addSurface();
+}
+function closeSurface(id){
+  const s=surfaceById(id);if(!s)return;
+  windows=windows.filter(w=>w.surface_id!==id);surfaces=surfaces.filter(item=>item!==s);
+  if(activeId&&!windowById(activeId))activeId=windows.at(-1)?.id||null;
+  cancel();status(`Surface ${s.number} closed`);
+  if(!surfaces.length){
+    alignStart=0;draft=[[.11,.22],[.89,.22],[.89,.83],[.11,.83]];showCalibration();
+    setSetupMessage('No surfaces are left. Define one to continue.');
+  }
 }
 function addSurface(){
   draft=[[.36,.35],[.64,.35],[.64,.65],[.36,.65]];
@@ -325,9 +348,10 @@ function cyclePicker(id,delta){const w=windowById(id);if(!w||w.content!=='picker
   const count=1+(renderer?.apps?.length||0);w.pickerIndex=(w.pickerIndex+delta+count)%count;render();}
 function selectProgram(id){const w=windowById(id);if(!w||w.content!=='picker')return;
   const list=[{type:'notes'},...(renderer?.apps||[])];w.content=list[w.pickerIndex||0].type;activeId=w.id;render();status(`${w.content} opened`);}
-function openActions(){if(phase!=='workspace')return;cancel();actions.hidden=false;status('Choose an action');}
+function openActions(){if(phase!=='workspace')return;cancel();actions.hidden=false;status('Choose Make Window, Screenshot, or New Surface');}
 function chooseAction(type){
   if(phase!=='workspace')return;
+  if(type==='surface'){startNewSurface();return;}
   if(type==='screenshot'&&windows.length){
     prompt('Screenshot source','What should be captured?',[
       ['Capture window',()=>{operation='capture-source';mode='target';actions.hidden=true;status('Click the window to capture');}],
@@ -336,7 +360,8 @@ function chooseAction(type){
   arm(type==='screenshot'?'physical':type);
 }
 function arm(type){action=type;mode='armed';interaction=null;actions.hidden=true;outline.hidden=true;
-  status(type==='physical'?'Drag to mark a physical area for the camera capture':`Drag a window area on one surface for ${type==='new'?'New Window':'Ask AI'}`);
+  const how='Pinch and drag with one hand, or pinch with both hands and spread them';
+  status(type==='physical'?`${how}, to mark the area to capture`:`${how}, to draw ${type==='new'?'the window':type==='ai'?'the Ask AI window':'the screenshot window'} on one surface`);
 }
 function cancel(){if(phase!=='workspace')return;mode='idle';action=null;interaction=null;operation=null;selectedId=null;destinationId=null;outline.hidden=true;labels.hidden=true;closePrompt();render();}
 function showOutline(r){outline.hidden=false;rectStyle(outline,r);}
@@ -360,26 +385,35 @@ function completeDrawing(r){outline.hidden=true;const chosen=candidate(r,action=
   windows.push(w);activeId=w.id;mode='idle';action=null;render();status(w.content==='picker'?'Scroll the program list, then pinch or click to confirm':'Ask AI window opened');
 }
 function confirm(title,description,yes){prompt(title,description,[['Yes',yes],['No',()=>{cancel();status('Canceled');}]]);}
+// Each gesture (or footer button) asks Yes/No once, then opens its menu; the menu choice picks a target.
+function askMainMenu(){confirm('Open main menu?','Show Make Window, Screenshot, and New Surface.',openActions);}
+function askManage(){confirm('Manage windows?','Choose Move, Resize, or Change surface, then pick the window.',manageMenu);}
+function askClose(){confirm('Close something?','Choose a window or a whole surface, then pick it.',closeMenu);}
+const OPERATION_TEXT={move:'move',resize:'resize',transfer:'move to another surface',close:'close'};
 function management(kind){
   if(phase!=='workspace')return;
-  confirm(`Do you want to ${kind} a window?`,'Confirm once, then click the target window.',()=>{
-    operation=kind;mode='target';actions.hidden=true;status(`Click the window to ${kind}`);
-  });
+  if(!windows.length){cancel();status('There are no windows yet.');return;}
+  if(kind==='transfer'&&surfaces.length<2){cancel();status('There is only one surface. Add one with New Surface first.');return;}
+  operation=kind;mode='target';actions.hidden=true;status(`Pinch or click the window to ${OPERATION_TEXT[kind]}`);
 }
-function manageMenu(){prompt('Manage windows','Choose an operation.',[
-  ['Move',()=>management('move')],['Resize',()=>management('resize')],['Cancel',openActions]]);}
+function manageMenu(){prompt('Manage windows','Choose an operation, then pick the window.',[
+  ['Move',()=>management('move')],['Resize',()=>management('resize')],['Change surface',()=>management('transfer')],['Cancel',cancel]]);}
+function closeMenu(){prompt('Close','Close a window, or a surface with all of its windows?',[
+  ['Window',()=>management('close')],
+  ['Surface',()=>{operation='close-surface';mode='surface-target';actions.hidden=true;status('Pinch or click the surface to close');}],
+  ['Cancel',cancel]]);}
+function chooseSurfaceToClose(s){
+  const count=otherWindows(s.id).length;mode='idle';
+  confirm(`Close Surface ${s.number}?`,`This removes the surface${count?` and its ${count} window${count===1?'':'s'}`:''}.`,()=>closeSurface(s.id));
+}
 function chooseTarget(id){
   const w=windowById(id);if(!w)return;
   activeId=id;selectedId=id;
   if(operation==='capture-source'){sourceId=id;mode='idle';arm('capture-window');status('Draw a free destination window for the screenshot');return;}
   if(operation==='close'){windows=windows.filter(item=>item.id!==id);activeId=windows.at(-1)?.id||null;cancel();render();status('Window closed');return;}
   if(operation==='resize'){mode='resize-ready';render();status('Drag any corner handle to resize. Escape cancels.');return;}
-  if(operation==='move'){
-    if(surfaces.length===1){mode='move-ready';render();status('Drag the selected window to a free position');return;}
-    prompt('Move to another surface?','You can keep this window here or choose a numbered destination.',[
-      ['Same surface',()=>{mode='move-ready';render();status('Drag the selected window to a free position');}],
-      ['New surface',showDestinationLabels],['Cancel',openActions]]);
-  }
+  if(operation==='move'){mode='move-ready';render();status('Drag the selected window to a free position');return;}
+  if(operation==='transfer')showDestinationLabels();
 }
 function showDestinationLabels(){mode='surface-pick';labels.hidden=false;labels.replaceChildren();
   for(const s of surfaces){if(s.id===windowById(selectedId)?.surface_id)continue;
@@ -403,6 +437,7 @@ function deliverContent(w,e){const s=surfaceById(w.surface_id),p=local(s,e);if(!
 }
 function handleInput(raw,target=null){
   if(raw?.version!==1||typeof raw.type!=='string')return false;
+  if(raw.type==='hold_progress'){cursor.style.setProperty('--hold',String(clamp(Number(raw.progress)||0,0,1)));return true;}
   if(raw.type==='calibration_result'){handleCalibrationResult(raw);return true;}
   if(phase==='markers'||phase==='marker-failed')return true;
   if(phase==='finger'||phase==='camera-check'){
@@ -429,9 +464,11 @@ function handleInput(raw,target=null){
     if(mode==='drawing'||mode==='moving'||mode==='resizing'){mode=mode==='drawing'?'armed':interaction?.returnMode||'idle';interaction=null;outline.hidden=true;render();}
     cursor.hidden=true;return true;
   }
-  if(raw.type==='two_hand_single_pinch'){confirm('Open main actions?','Show New Window, Screenshot, and Ask AI.',openActions);return true;}
-  if(raw.type==='two_hand_double_pinch'){confirm('Manage windows?','Open Move and Resize options.',manageMenu);return true;}
-  if(raw.type==='thumbs_down'){management('close');return true;}
+  // A gesture menu never interrupts drawing, moving, or resizing.
+  const busy=['armed','drawing','moving','resizing'].includes(mode);
+  if(raw.type==='two_hand_hold'){if(busy)return false;askMainMenu();return true;}
+  if(raw.type==='peace_sign'){if(busy)return false;askManage();return true;}
+  if(raw.type==='thumbs_down'){if(busy)return false;askClose();return true;}
   if(raw.type==='scroll'){
     const point=pointForEvent(raw);if(!point)return false;
     const frame=at(point)?.closest('.surface-window'),w=windowById(frame?.dataset.windowId);
@@ -470,6 +507,10 @@ function handleInput(raw,target=null){
     if(mode==='transfer-ready'){placeTransfer(e);return true;}
     if(mode==='target'){
       const id=target?.closest('.surface-window')?.dataset.windowId;if(id){chooseTarget(id);return true;}return false;
+    }
+    if(mode==='surface-target'){
+      if(target?.closest('footer,.panel'))return false;
+      const s=surfaceAt(e);if(s){chooseSurfaceToClose(s);return true;}return false;
     }
     if(mode==='armed'){
       if(!surfaceAt(e)||target?.closest('footer,.panel,.surface-window'))return false;
@@ -601,9 +642,9 @@ $('retry-alignment').addEventListener('click',retryCameraAlignment);
 $('add-surface').addEventListener('click',addSurface);
 $('finish-setup').addEventListener('click',finishSetup);
 actions.addEventListener('click',e=>{const button=e.target.closest('[data-action]');if(button)chooseAction(button.dataset.action);});
-$('actions-button').addEventListener('click',()=>confirm('Open main actions?','Show the three main choices.',openActions));
-$('manage-button').addEventListener('click',()=>confirm('Manage windows?','Open Move and Resize options.',manageMenu));
-$('close-button').addEventListener('click',()=>management('close'));
+$('actions-button').addEventListener('click',askMainMenu);
+$('manage-button').addEventListener('click',askManage);
+$('close-button').addEventListener('click',askClose);
 $('fullscreen').addEventListener('click',()=>document.fullscreenElement?document.exitFullscreen():stage.requestFullscreen?.());
 calibration.addEventListener('pointerdown',e=>{
   if(phase!=='calibration')return;
@@ -643,6 +684,6 @@ window.SurfaceOS=Object.freeze({
   dispatchInput:event=>handleInput(event),
   mountWidgetRenderer(value){if(!value||typeof value.renderLayout!=='function')throw new TypeError('Expected renderer');renderer=value;render();},
   getState:()=>({phase,mode,surfaces:structuredClone(surfaces),windows:structuredClone(windows)}),
-  reset:()=>{if(cameraStep)clearTimeout(cameraStep.timer);cameraStep=null;markerToken++;stage.classList.remove('marker-capture');cursor.hidden=true;surfaces=[];windows=[];nextId=1;activeId=null;mode='idle';action=null;interaction=null;pendingImage=null;draft=[[.11,.22],[.89,.22],[.89,.83],[.11,.83]];showCalibration();},
+  reset:()=>{if(cameraStep)clearTimeout(cameraStep.timer);cameraStep=null;markerToken++;stage.classList.remove('marker-capture');cursor.hidden=true;surfaces=[];windows=[];nextId=1;nextSurface=1;alignStart=0;activeId=null;mode='idle';action=null;interaction=null;pendingImage=null;draft=[[.11,.22],[.89,.22],[.89,.83],[.11,.83]];showCalibration();},
 });
 showCalibration();
