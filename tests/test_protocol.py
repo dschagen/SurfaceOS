@@ -52,6 +52,10 @@ class NewEventProtocolTests(unittest.TestCase):
         message = encode(SurfaceInputEvent(SCROLL, 0, 0.5, 0.5, dy=-0.03))
         self.assertEqual(message["dy"], -0.03)
 
+    def test_hold_progress_has_only_progress(self):
+        message = encode(SurfaceInputEvent("hold_progress", None, progress=0.456))
+        self.assertEqual(message, {"version": 1, "type": "hold_progress", "progress": 0.46, "source": "hand"})
+
     def test_gestures_from_any_hand_are_sent(self):
         primary = PrimaryPointer()
         primary.select([pointer(0), pointer(1)])

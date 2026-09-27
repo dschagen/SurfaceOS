@@ -21,7 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from integration_smoke import (BROWSERS, HEIGHT, ROOT, WIDTH, Browser, Hand, SurfaceServer,  # noqa: E402
-                               check, free_port)
+                               answer_calibration, check, free_port, surface_point)
 
 YT = '[data-surfaceos-window="window-1"]'
 
@@ -90,11 +90,10 @@ def open_program(browser: Browser, start: tuple[float, float], end: tuple[float,
 
 
 def manage(browser: Browser, operation: str, window_id: str) -> None:
-    """Manage -> Yes -> Move or Resize -> Yes -> click the target window."""
+    """Manage -> Yes -> Move or Resize -> click the target window."""
     browser.click(*browser.center("#manage-button"))
     dialog_choice(browser, "Yes")
     dialog_choice(browser, operation)
-    dialog_choice(browser, "Yes")
     browser.click(*browser.center(f'[data-window-id="{window_id}"] .window-header'))
 
 
@@ -104,15 +103,17 @@ def run(browser: Browser, hand: Hand, base_url: str, hand_url: str) -> None:
     browser.wait_for("document.readyState === 'complete' && !!window.SurfaceOS", label="shell loaded")
     browser.wait_for("document.querySelector('#hand-status').textContent.includes('connected')", label="hand bridge")
 
-    print("Setup: one surface, hand alignment on the shown targets")
+    print("Setup: one surface, marker calibration, then the C and OK holds")
     browser.click(*browser.center("#confirm-surface"))
     browser.click(*browser.center("#finish-setup"))
     dialog_choice(browser, "Align hands")
-    for _ in range(4):
-        # Pinching exactly on each target makes hand coordinates line up with the page.
-        tx, ty = browser.center(".camera-target")
-        hand.pinch(tx / WIDTH, ty / HEIGHT)
-        time.sleep(0.15)
+    # The markers are read from a screenshot, so hand coordinates line up with the page.
+    browser.wait_for("!!document.querySelector('.marker-plane')", label="markers")
+    check(answer_calibration(browser, hand)["ok"], "markers found")
+    browser.wait_for(f"{state}.phase === 'finger'", label="fingertip step")
+    hand.dwell(*surface_point(browser, .5, .5))
+    browser.wait_for(f"{state}.phase === 'camera-check'", label="check step")
+    hand.dwell(*surface_point(browser, .5, .22))
     check(browser.wait_for(f"{state}.phase === 'workspace'", label="workspace"), "calibrated and in the workspace")
 
     print("Mouse: open a YouTube window")
@@ -153,6 +154,7 @@ def run(browser: Browser, hand: Hand, base_url: str, hand_url: str) -> None:
     check(wait_playing(browser, 5), "video still playing after move and resize")
     browser.click(*browser.center("#close-button"))
     dialog_choice(browser, "Yes")
+    dialog_choice(browser, "Window")
     browser.click(*browser.center('[data-window-id="window-2"] .window-header'))
     check(browser.wait_for(f"{state}.windows.length === 1", label="closed"), "second window closed")
     check(browser.eval(same_frame), "closing the other window kept the player")

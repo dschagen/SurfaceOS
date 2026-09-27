@@ -11,19 +11,19 @@ This document defines the intended user experience. The browser shell now implem
 ## Startup
 
 1. On every launch, show calibration before any windows.
-2. Mark the usable boundary of Surface 1. Calibrate the flat region's projected geometry and the camera input mapping needed for accurate interaction.
+2. Mark the usable boundary of Surface 1. Calibrate the flat region's projected geometry. Then project a marker grid on the surface so the camera can measure it automatically, and explain any failure with Retry and Skip. Next, the user touches the center C and holds still for 4 seconds to correct the fingertip position; a filling progress ring resets if the hand moves or tracking stops. Finally, the calibrated cursor should follow the fingertip: holding on OK for 4 seconds accepts the surface, and a thumbs down retries it.
 3. Ask whether to add another surface. Repeat boundary calibration and number each surface until the user finishes. All demo surfaces use the same projector and are positioned within its illumination and usable focus range.
-4. Enter a nearly blank environment. Show the three main actions: **New Window**, **Screenshot**, **Ask AI**.
+4. Enter a nearly blank environment. Show the three main actions: **Make Window**, **Screenshot**, **New Surface**.
 5. Nothing from a previous session, including windows and notes, is automatically restored.
 
 ## Creating a window
 
-1. Choose one of the three main actions **before** drawing.
-2. Define the new window area by moving both hands apart while pinching, then release. The mouse test adapter can click and drag to stand in for this step. Show the outline continuously.
+1. Choose **Make Window** or **Screenshot** **before** drawing.
+2. Define the area by pinching with both hands and moving them apart, or by pinching with one hand (held 0.5 s) and dragging, then release. The mouse can click and drag instead. Show the outline continuously.
 3. Reject or constrain placement that crosses a surface boundary or overlaps another window. Explain the constraint visibly instead of silently losing the action.
 4. The resulting window stays on its chosen surface until explicitly moved.
 
-### New Window
+### Make Window
 
 Inside the drawn window, display a scrollable program picker. The index finger scrolls or flicks without a confirmation prompt. The centered item is shown as `> selection <`, with a short **Pinch to confirm** hint. A one-hand pinch launches that item. Program types and their rendering are supplied by the widget/app teammate; the shell owns the window frame and chosen content identity.
 
@@ -37,32 +37,41 @@ Inside the drawn window, display a scrollable program picker. The index finger s
 
 The Ask AI camera action should reuse the physical-area capture path rather than inventing a second camera workflow.
 
+### New Surface
+
+Repeat the startup surface steps for one or more additional surfaces: drag the four corners with the mouse and keyboard, confirm, optionally add more, then run the marker, C and OK alignment for the new surfaces only. Existing surfaces and windows stay as they are. **Cancel new surface** returns to the workspace.
+
 ### Ask AI
 
-The drawn window contains an AI conversation area with a microphone action for a spoken question and a camera action to capture and send an image. Its real answer must reflect the actual voice question or selected image. Permission prompts and unavailable hardware need clear feedback.
+Ask AI is not in the main menu. A thumbs-up gesture is reserved to open it once the widget teammate connects it. The Ask AI window contains an AI conversation area with a microphone action for a spoken question and a camera action to capture and send an image. Its real answer must reflect the actual voice question or selected image. Permission prompts and unavailable hardware need clear feedback.
 
-## Returning to actions and managing windows
+## Gestures
 
-| Trigger | Shell response |
+Every activating gesture is held for 0.5 s. While a hold builds up, the cursor ring (15 px, colored by surface) fills.
+
+| Gesture | Shell response |
 | --- | --- |
-| Two-hand single pinch | Reopen the three main actions. |
-| Two-hand double pinch | Offer Move and Resize modes. |
-| Move or Resize chosen | Ask for confirmation, then select a target window with one click. |
-| Move on current surface | Drag the selected window; prevent overlap and boundary crossing. |
-| Move to another surface | Ask whether to move to a new surface; show large numbered labels on calibrated surfaces; select a destination number, place the window there, and prevent overlap. |
-| Resize | Expose draggable controls on the selected window's four corners; keep it within its surface and free of overlap. |
-| Thumbs down | Offer to close a window; after confirmation, select its target with one click. |
-| Index-finger point and flick | Scroll lists or window content without an approval prompt. |
+| One-hand pinch | Click; keep pinching to drag. |
+| Both hands pinched and still | **Open main menu?** Yes/No, then **Make Window / Screenshot / New Surface**. |
+| Both hands pinched, then spread | Draw the area after Make Window or Screenshot. |
+| Peace sign | **Manage windows?** Yes/No, then **Move / Resize / Change surface**, then pinch the target window. |
+| Thumbs down | **Close something?** Yes/No, then **Window / Surface**, then pinch the target. Closing a surface asks once more, then removes it and its windows. |
+| Index finger pointing | Scroll lists or window content while held, without an approval prompt. |
+| Thumbs up | Reserved for Ask AI. |
 
-Gesture-triggered mode changes and actions show a short **Do you want to …?** confirmation with Yes and No, except for ordinary pointing and scrolling. Confirmation should happen once before a move or resize interaction, rather than after every motion frame. The initial three-action choice is direct. A one-hand pinch confirms the centered program-picker item.
+- **Move:** drag the selected window on its surface; prevent overlap and boundary crossing.
+- **Resize:** expose draggable controls on the selected window's four corners; keep it within its surface and free of overlap.
+- **Change surface:** show large numbered labels on the other calibrated surfaces; choose a destination, pinch a free spot there, and prevent overlap.
+
+Gesture-triggered menus ask Yes/No once before opening, except for ordinary pointing and scrolling. Choices inside a menu are direct. A one-hand pinch confirms the centered program-picker item.
 
 ## Mouse testing equivalents
 
-The shell should remain fully testable without a camera. Clicks can select actions, targets, numbered surfaces, and Yes/No. Click-drag stands in for two-hand window definition, moving, and corner resizing; the mouse wheel stands in for pointer-finger scrolling. The screen should label these temporary testing controls without making them the projected product's primary visual language.
+The shell should remain fully testable without a camera. The footer buttons **Menu**, **Manage** and **Close** open the same menus as the two-hand hold, peace sign and thumbs down. Clicks can select actions, targets, numbered surfaces, and Yes/No. Click-drag stands in for two-hand window definition, moving, and corner resizing; the mouse wheel stands in for pointer-finger scrolling. The screen should label these temporary testing controls without making them the projected product's primary visual language.
 
 ## Implementation boundaries and unresolved technical details
 
 - The shell now implements calibration-first setup, action-before-draw, per-surface perspective transforms, camera-target alignment, and the window management states. Digital screenshot rendering and browser camera capture have implementation paths but still require browser and hardware validation. No AI model endpoint is connected.
-- The shell consumes the existing version 1 two-hand and pointer event names. Hand gesture recognition belongs to input; the shell decides actions and target selection; widgets render inside windows. Camera points are transformed by the shell after the guided four-target alignment, so the tracker must not also warp them.
+- The shell consumes the version 1 pointer and gesture events listed in `docs/input.md`. Hand gesture recognition belongs to input; the shell decides actions and target selection; widgets render inside windows. Camera points are transformed by the shell with the per-surface marker calibration and fingertip offset, so the tracker must not also warp them.
 - Precise physical screenshots require mapping camera pixels to each calibrated surface. Projector correction and camera input mapping are related, but they are distinct transformations.
 - A reliable nonoverlap policy should be tested on each surface's logical coordinates, including after moving or resizing. The user-facing result should stay predictable when a proposed placement is invalid.

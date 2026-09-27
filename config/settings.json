@@ -1,8 +1,9 @@
 {
   "camera": {
     "index": 1,
-    "width": null,
-    "height": null
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
   },
   "tracking": {
     "max_hands": 2,
@@ -13,12 +14,11 @@
     "end_ratio": 0.5,
     "release_grace_s": 0.1
   },
-  "two_hand": {
-    "single_max_spread": 0.05,
-    "double_interval_s": 0.45
-  },
-  "thumbs_down": {
+  "gestures": {
     "hold_s": 0.5
+  },
+  "two_hand": {
+    "hold_max_spread": 0.05
   },
   "scroll": {
     "flick_min_speed": 1.0,

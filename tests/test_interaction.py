@@ -3,14 +3,20 @@ import unittest
 from helpers import make_hand
 from calibration.coordinate_mapper import CoordinateMapper
 from gestures.gesture_detector import GestureDetector
-from input.events import (POINTER_CANCEL, POINTER_DOWN, POINTER_MOVE, POINTER_UP, SCROLL,
-                          THUMBS_DOWN, TWO_HAND_PINCH_END, TWO_HAND_PINCH_START)
+from input.events import (HOLD_PROGRESS, PEACE_SIGN, POINTER_CANCEL, POINTER_DOWN, POINTER_MOVE,
+                          POINTER_UP, SCROLL, THUMBS_DOWN, TWO_HAND_HOLD, TWO_HAND_PINCH_END,
+                          TWO_HAND_PINCH_START)
 from input.interaction_state import InteractionState
 from test_gestures import OPEN, PINCHED, SETTINGS
 
 
 def types(events):
-    return [event.type for event in events]
+    """Event types without the hold_progress updates, which tests check separately."""
+    return [event.type for event in events if event.type != HOLD_PROGRESS]
+
+
+def progress(events):
+    return [event.progress for event in events if event.type == HOLD_PROGRESS]
 
 
 class InteractionTests(unittest.TestCase):
@@ -30,13 +36,38 @@ class InteractionTests(unittest.TestCase):
         self.assertEqual(types(events), [POINTER_MOVE])
         self.assertAlmostEqual(events[0].x, 0.7)  # mirrored into canvas space
 
-    def test_pinch_is_one_down_then_one_up(self):
-        _, events = self.step([make_hand(pinch_ratio=PINCHED)])
+    def hold_pinch(self, frames=6):
+        """Pinches one hand for frames x 0.1 s and returns all events."""
+        found = []
+        for _ in range(frames):
+            _, events = self.step([make_hand(pinch_ratio=PINCHED)])
+            found += events
+        return found
+
+    def test_pinch_presses_after_hold_then_releases_once(self):
+        found = self.hold_pinch(5)                     # 0.4 s since the pinch began
+        self.assertNotIn(POINTER_DOWN, types(found))
+        _, events = self.step([make_hand(pinch_ratio=PINCHED)])   # 0.5 s
         self.assertEqual(types(events), [POINTER_MOVE, POINTER_DOWN])
         _, events = self.step([make_hand(pinch_ratio=PINCHED)])
         self.assertEqual(types(events), [POINTER_MOVE])  # holding: movement only, no repeat press
         _, events = self.step([make_hand(pinch_ratio=OPEN)])
         self.assertEqual(types(events), [POINTER_MOVE, POINTER_UP])
+
+    def test_short_pinch_sends_no_press(self):
+        found = self.hold_pinch(3)
+        _, events = self.step([make_hand(pinch_ratio=OPEN)])
+        found += events
+        self.assertNotIn(POINTER_DOWN, types(found))
+        self.assertNotIn(POINTER_UP, types(found))
+        self.assertEqual(progress(found)[-1], 0.0)     # the ring empties again
+
+    def test_pinch_hold_progress_fills_then_clears_on_press(self):
+        found = self.hold_pinch(6)
+        values = progress(found)
+        self.assertEqual(values[:-1], sorted(values[:-1]))
+        self.assertGreaterEqual(values[-2], 0.8)
+        self.assertEqual(values[-1], 0.0)
 
     def test_lost_hand_cancels(self):
         self.step([make_hand(pinch_ratio=PINCHED)])
@@ -45,8 +76,9 @@ class InteractionTests(unittest.TestCase):
         self.assertEqual(types(events), [POINTER_CANCEL])
 
     def test_second_hand_pinching_cancels_first_press(self):
-        self.step([make_hand(0, tip=(0.3, 0.5), pinch_ratio=PINCHED),
-                   make_hand(1, tip=(0.7, 0.5), pinch_ratio=OPEN)])
+        for _ in range(6):
+            self.step([make_hand(0, tip=(0.3, 0.5), pinch_ratio=PINCHED),
+                       make_hand(1, tip=(0.7, 0.5), pinch_ratio=OPEN)])
         _, events = self.step([make_hand(0, tip=(0.3, 0.5), pinch_ratio=PINCHED),
                                make_hand(1, tip=(0.7, 0.5), pinch_ratio=PINCHED)])
         found = types(events)
@@ -103,6 +135,24 @@ class InteractionTests(unittest.TestCase):
             _, events = self.step([make_hand(gesture="Thumb_Down", score=0.9)])
             found += types(events)
         self.assertEqual(found.count(THUMBS_DOWN), 1)
+
+    def test_peace_sign_event(self):
+        found = []
+        for _ in range(12):
+            _, events = self.step([make_hand(gesture="Victory", score=0.9)])
+            found += types(events)
+        self.assertEqual(found.count(PEACE_SIGN), 1)
+
+    def test_two_hand_still_pinch_holds_once_without_pointer_press(self):
+        both = [make_hand(0, tip=(0.3, 0.5), pinch_ratio=PINCHED),
+                make_hand(1, tip=(0.7, 0.5), pinch_ratio=PINCHED)]
+        found = []
+        for _ in range(10):
+            _, events = self.step(both)
+            found += events
+        self.assertEqual(types(found).count(TWO_HAND_HOLD), 1)
+        self.assertNotIn(POINTER_DOWN, types(found))
+        self.assertGreater(max(progress(found)), 0.7)
 
 
 if __name__ == "__main__":

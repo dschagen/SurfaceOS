@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from input.events import (POINTER_CANCEL, POINTER_DOWN, POINTER_MOVE,  # noqa: E402
                           POINTER_UP, TWO_HAND_PINCH_START, TWO_HAND_PINCH_MOVE,
-                          TWO_HAND_PINCH_END, TWO_HAND_SINGLE_PINCH, Pointer, SurfaceInputEvent)
+                          TWO_HAND_PINCH_END, TWO_HAND_HOLD, HOLD_PROGRESS, Pointer, SurfaceInputEvent)
 from server.protocol import encode, hands_debug_message  # noqa: E402
 from server.server import SurfaceServer  # noqa: E402
 from settings import load_settings  # noqa: E402
@@ -55,7 +55,17 @@ class Script:
             self.send(POINTER_MOVE)
             time.sleep(FRAME_S)
 
+    def fill_hold(self, seconds: float = 0.5) -> None:
+        """The cursor ring filling during a gesture hold, as the tracker sends it."""
+        frames = max(1, int(seconds / FRAME_S))
+        for i in range(1, frames):
+            self.server.publish(encode(SurfaceInputEvent(HOLD_PROGRESS, None, progress=i / frames)))
+            self.send(POINTER_MOVE)
+            time.sleep(FRAME_S)
+        self.server.publish(encode(SurfaceInputEvent(HOLD_PROGRESS, None, progress=0.0)))
+
     def click(self) -> None:
+        self.fill_hold()
         self.send(POINTER_DOWN)
         self.hold(0.15)
         self.send(POINTER_UP)
@@ -78,8 +88,9 @@ class Script:
         self.click()
         self.hold(0.8)
 
-        print("-- two-hand action request, then a window rectangle if an action was selected")
-        self.send(TWO_HAND_SINGLE_PINCH)
+        print("-- two-hand hold asks for the main menu, then a window rectangle if Make Window was chosen")
+        self.fill_hold()
+        self.send(TWO_HAND_HOLD)
         self.rectangle(TWO_HAND_PINCH_START, 0.2, 0.3, 0.08, 0.07)
         for i in range(1, 13):
             self.rectangle(TWO_HAND_PINCH_MOVE, 0.2, 0.3, 0.08 + i * 0.025, 0.07 + i * 0.02)
@@ -89,6 +100,7 @@ class Script:
 
         print("-- press, then lose tracking mid-drag")
         self.move_to(0.7, 0.3, 0.5)
+        self.fill_hold()
         self.send(POINTER_DOWN)
         self.move_to(0.8, 0.4, 0.4)
         self.send(POINTER_CANCEL)

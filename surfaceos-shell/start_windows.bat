@@ -16,7 +16,8 @@ if %errorlevel%==0 (
 )
 
 rem Serve the repository root so the shell can load the widget renderer from ..\frontend.
-start "SurfaceOS local server" cmd /k "%PYTHON_CMD% -m http.server 8000 --directory .."
+rem The dev server turns off browser caching so edited scripts always load.
+start "SurfaceOS local server" cmd /k "%PYTHON_CMD% ..\tools\dev_server.py 8000"
 timeout /t 2 /nobreak >nul
 start "" "http://localhost:8000/surfaceos-shell/frontend/"
 echo SurfaceOS opened in your browser. Close the server window when finished.
