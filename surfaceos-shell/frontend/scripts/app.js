@@ -10,16 +10,7 @@ const editControls=$('edit-controls');
 let surfaces=[], draft=[[.11,.22],[.89,.22],[.89,.83],[.11,.83]], windows=[], nextId=1;
 let phase='calibration', mode='idle', action=null, interaction=null, operation=null, selectedId=null;
 let activeId=null, renderer=null, sourceId=null, destinationId=null, cameraStep=null, pendingImage=null;
-<<<<<<< HEAD
 let setupDrag=null, hoveredHandWindowId=null;
-=======
-let setupDrag=null;
-<<<<<<< HEAD
-// Ask AI after a thumbs-up: {stage:'prompt'|'capturing'|'placing', mode:'voice'|'screenshot', capture, token}.
-let assist=null,assistToken=0;
-// Wait for the blanked projection to reach the camera before asking the tracker for a photo.
-const CAPTURE_SETTLE_MS=150;
-=======
 // Move and resize remember the window's starting bounds so Cancel can restore them.
 let editBase=null;
 const EDIT_MODES=['move-ready','moving','resize-ready','resizing','resizing-hands'];
@@ -27,8 +18,10 @@ const EDIT_MODES=['move-ready','moving','resize-ready','resizing','resizing-hand
 // scrolls at SCROLL_GAIN times the finger's movement.
 const PICKER_STEP=.08,SCROLL_GAIN=.5;
 let pickerScroll={id:null,travel:0};
->>>>>>> 321d8791f919d587828649611d2d73de2b03b4c1
->>>>>>> 0f56f5bc706b80b56daacb4cda22a097d6044217
+// Ask AI after a thumbs-up: {stage:'prompt'|'capturing'|'placing', mode:'voice'|'screenshot', capture, token}.
+let assist=null,assistToken=0;
+// Wait for the blanked projection to reach the camera before asking the tracker for a photo.
+const CAPTURE_SETTLE_MS=150;
 // Surface numbers are never reused after a close. Hand alignment covers surfaces from alignStart on.
 let nextSurface=1, alignStart=0;
 const HOLD_S=DWELL_MS/1000;
@@ -352,11 +345,7 @@ function render(){
       }
       frame.className=`surface-window${w.id===activeId?' active':''}${w.id===hoveredHandWindowId?' hand-hover':''}`;
       frame.style.zIndex=String(windows.indexOf(w)+1);rectStyle(frame,w);
-<<<<<<< HEAD
-      frame.querySelector('.window-header').textContent=`${w.content==='picker'?'Select a program':w.content==='screenshot'?'Screenshot':renderer?.apps?.find(a=>a.type===w.content)?.title||w.content} · ${w.id}`;
-=======
-      frame.querySelector('.window-header').textContent=w.content==='picker'?'Select a program':w.content==='ai'?'Ask AI':w.content==='screenshot'?'Screenshot':renderer?.apps?.find(a=>a.type===w.content)?.title||w.content;
->>>>>>> 0f56f5bc706b80b56daacb4cda22a097d6044217
+      frame.querySelector('.window-header').textContent=w.content==='picker'?'Select a program':w.content==='screenshot'?'Screenshot':renderer?.apps?.find(a=>a.type===w.content)?.title||w.content;
       frame.querySelectorAll('.resize-corner').forEach(handle=>handle.remove());
       if(mode==='resize-ready'&&selectedId===w.id) for(const key of ['nw','ne','se','sw']){
         const handle=document.createElement('span');handle.className=`resize-corner ${key}`;handle.dataset.resize=key;frame.append(handle);
@@ -592,6 +581,10 @@ function handClick(e,target){
 function handleInput(raw,target=null){
   if(raw?.version!==1||typeof raw.type!=='string')return false;
   if(raw.type==='hold_progress'){cursor.style.setProperty('--hold',String(clamp(Number(raw.progress)||0,0,1)));return true;}
+  // From the moment a pinch hold completes until the fingers open, the ring stays full and glows:
+  // nothing is clicked yet, and releasing clicks wherever the ring is then.
+  if(raw.source==='hand'&&raw.type==='pointer_down')cursor.classList.add('armed');
+  if(raw.source==='hand'&&(raw.type==='pointer_up'||raw.type==='pointer_cancel'))cursor.classList.remove('armed');
   if(raw.type==='calibration_result'){handleCalibrationResult(raw);return true;}
   if(phase==='markers'||phase==='marker-failed')return true;
   if(phase==='finger'||phase==='camera-check'){
@@ -618,17 +611,12 @@ function handleInput(raw,target=null){
     if(mode==='content'&&interaction){const w=windowById(interaction.id);if(w)deliverContent(w,{...interaction.last,type:'pointer_cancel'});}
     if(mode==='resizing-hands'){const w=windowById(interaction?.id);if(w)Object.assign(w,interaction.base);mode='resize-ready';interaction=null;render();}
     if(mode==='drawing'||mode==='moving'||mode==='resizing'){mode=mode==='drawing'?'armed':interaction?.returnMode||'idle';interaction=null;outline.hidden=true;render();}
-<<<<<<< HEAD
     if(raw.source==='hand')setHandHover(null);
-    cursor.hidden=true;return true;
-=======
     if(raw.type==='pointer_cancel')cursor.hidden=true;
     return true;
->>>>>>> 321d8791f919d587828649611d2d73de2b03b4c1
   }
   // A gesture menu never interrupts drawing, moving, or resizing.
-<<<<<<< HEAD
-  const busy=['armed','drawing','moving','resizing'].includes(mode);
+  const busy=['armed','drawing',...EDIT_MODES].includes(mode);
   if(raw.type==='thumbs_up'){
     const point=Number.isFinite(raw.x)&&Number.isFinite(raw.y)?pointForEvent(raw)||offSurfacePoint(raw):null;
     return openAskAI(point);
@@ -640,9 +628,6 @@ function handleInput(raw,target=null){
   }
   // Other gesture menus wait until an Ask AI step is finished or cancelled.
   if(assist&&(raw.type==='two_hand_hold'||raw.type==='peace_sign'))return false;
-=======
-  const busy=['armed','drawing',...EDIT_MODES].includes(mode);
->>>>>>> 0f56f5bc706b80b56daacb4cda22a097d6044217
   if(raw.type==='two_hand_hold'){if(busy)return false;askMainMenu();return true;}
   if(raw.type==='peace_sign'){if(busy)return false;askManage();return true;}
   if(raw.type==='scroll'){
@@ -869,11 +854,11 @@ stage.addEventListener('pointerup',e=>{
 });
 stage.addEventListener('pointercancel',e=>handleInput({version:1,type:'pointer_cancel',source:'mouse'}));
 document.addEventListener('keydown',e=>{
-<<<<<<< HEAD
-  if(e.key==='Escape'){if(!assist&&activeId&&renderer?.cancelFlow?.(activeId))return;cancel();return;}
-=======
-  if(e.key==='Escape'){if(EDIT_MODES.includes(mode))finishEdit(false);else cancel();return;}
->>>>>>> 0f56f5bc706b80b56daacb4cda22a097d6044217
+  if(e.key==='Escape'){
+    if(EDIT_MODES.includes(mode)){finishEdit(false);return;}
+    if(!assist&&activeId&&renderer?.cancelFlow?.(activeId))return;
+    cancel();return;
+  }
   if(e.target.matches('textarea,input,[contenteditable]')||e.ctrlKey||e.metaKey||e.altKey)return;
   if(e.key.toLowerCase()==='f')$('fullscreen').click();
   if(phase==='workspace'&&e.key.toLowerCase()==='n')chooseAction('new');
@@ -884,14 +869,9 @@ window.addEventListener('resize',()=>{keepSetupVisible();render();});
 window.SurfaceOS=Object.freeze({
   dispatchInput:event=>handleInput(event),
   mountWidgetRenderer(value){if(!value||typeof value.renderLayout!=='function')throw new TypeError('Expected renderer');renderer=value;render();},
-<<<<<<< HEAD
   getState:()=>({phase,mode,assist:assist?.stage??null,surfaces:structuredClone(surfaces),windows:structuredClone(windows)}),
   captureDesk:windowId=>captureDesk(windowId),
   closeWindow:id=>closeWindow(id),
-  reset:()=>{if(cameraStep)clearTimeout(cameraStep.timer);cameraStep=null;markerToken++;stage.classList.remove('marker-capture');cursor.hidden=true;surfaces=[];windows=[];nextId=1;nextSurface=1;alignStart=0;activeId=null;mode='idle';action=null;interaction=null;pendingImage=null;setupDrag=null;assist=null;setup.classList.remove('is-moved');setup.style.left='';setup.style.top='';draft=[[.11,.22],[.89,.22],[.89,.83],[.11,.83]];showCalibration();},
-=======
-  getState:()=>({phase,mode,surfaces:structuredClone(surfaces),windows:structuredClone(windows)}),
-  reset:()=>{if(cameraStep)clearTimeout(cameraStep.timer);cameraStep=null;markerToken++;stage.classList.remove('marker-capture');cursor.hidden=true;surfaces=[];windows=[];nextId=1;nextSurface=1;alignStart=0;activeId=null;hoveredHandWindowId=null;mode='idle';action=null;interaction=null;pendingImage=null;setupDrag=null;setup.classList.remove('is-moved');setup.style.left='';setup.style.top='';draft=[[.11,.22],[.89,.22],[.89,.83],[.11,.83]];showCalibration();},
->>>>>>> 0f56f5bc706b80b56daacb4cda22a097d6044217
+  reset:()=>{if(cameraStep)clearTimeout(cameraStep.timer);cameraStep=null;markerToken++;stage.classList.remove('marker-capture');cursor.hidden=true;surfaces=[];windows=[];nextId=1;nextSurface=1;alignStart=0;activeId=null;hoveredHandWindowId=null;mode='idle';action=null;interaction=null;pendingImage=null;setupDrag=null;assist=null;setup.classList.remove('is-moved');setup.style.left='';setup.style.top='';draft=[[.11,.22],[.89,.22],[.89,.83],[.11,.83]];showCalibration();},
 });
 showCalibration();

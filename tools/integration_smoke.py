@@ -292,9 +292,13 @@ def run(browser: Browser, hand: Hand, base_url: str, hand_url: str) -> None:
     dialog_title(browser)
     hand.move(*page_point(browser, "#dialog button:last-child"))    # press on No
     hand.send(POINTER_DOWN)
+    check(browser.eval("cursor.classList.contains('armed')"), "a completed pinch hold makes the ring glow")
     hand.move(*page_point(browser, "#dialog button:first-child"))   # release on Yes
+    check(browser.eval("!document.querySelector('#dialog').hidden && document.querySelector('#actions').hidden"),
+          "nothing is clicked while the pinch is held")
     hand.send(POINTER_UP)
     check(browser.wait_for("!document.querySelector('#actions').hidden", label="release click"), "release on Yes chose Yes")
+    check(browser.eval("!cursor.classList.contains('armed')"), "the glow ends on release")
     browser.send("Input.dispatchKeyEvent", type="keyDown", key="Escape", code="Escape", windowsVirtualKeyCode=27)
     browser.wait_for(f"{state}.mode === 'idle'", label="menu closed")
 

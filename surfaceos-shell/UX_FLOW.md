@@ -62,7 +62,7 @@ Every activating gesture is held for 0.25 s. While a hold builds up, the cursor 
 - **Move:** drag the selected window on its surface; prevent overlap and boundary crossing.
 - **Resize:** pinch with both hands and spread them; the rectangle between the hands becomes the window's new size live, and releasing both pinches keeps it and ends Resize. The mouse can drag the four corner handles instead. Keep the window within its surface and free of overlap.
 - **Move and Resize** show **Done** and **Cancel** buttons until they end. Cancel puts the window back where it was.
-- **Hand clicks happen on release:** pinch until the ring fills, then let go; the click lands where the ring is at that moment. Drags (drawing, moving) start when the ring fills.
+- **Hand clicks happen on release:** pinch until the ring fills; the ring then stays full and glows while the pinch is held, and nothing is clicked yet. Let go over the target, and the click lands where the ring is at that moment. Drags (drawing, moving) start when the ring fills.
 - **Change surface:** show large numbered labels on the other calibrated surfaces; choose a destination, pinch a free spot there, and prevent overlap.
 
 Gesture-triggered menus ask Yes/No once before opening, except for ordinary pointing and scrolling. Choices inside a menu are direct. A one-hand pinch confirms the centered program-picker item.
