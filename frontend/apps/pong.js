@@ -11,9 +11,6 @@ const MAX_SPEED = 2.2;
 const KEY_PADDLE_SPEED = 1.3;
 const AI_SPEED = 0.95;
 
-const TOP_BAR = rect(0.02, 0.02, 0.96, 0.1);
-const FIELD = rect(0.02, 0.14, 0.96, 0.84);
-
 export function createPongGame(aspect = 1.6) {
   const game = {
     width: aspect,
@@ -130,7 +127,7 @@ function draw(canvas, game, { paused, mode }) {
   g.stroke();
   g.setLineDash([]);
 
-  g.font = `200 ${Math.round(unit * 0.2)}px "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif`;
+  g.font = `200 ${Math.max(28 * dpr, Math.min(96 * dpr, Math.round(unit * 0.2)))}px "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif`;
   g.textAlign = 'center';
   g.textBaseline = 'top';
   g.fillStyle = 'rgba(167, 139, 250, 0.55)';
@@ -165,9 +162,14 @@ function draw(canvas, game, { paused, mode }) {
     g.fillStyle = 'rgba(7, 10, 22, 0.72)';
     g.fillRect(0, 0, width, height);
     g.fillStyle = '#ffffff';
-    g.font = `700 ${Math.round(unit * 0.12)}px "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif`;
+    const bannerFont = Math.max(28 * dpr, Math.min(64 * dpr, Math.round(unit * 0.12)));
+    g.font = `700 ${bannerFont}px "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif`;
     g.textBaseline = 'middle';
-    g.fillText(banner, width / 2, unit * 0.5);
+    const lines = g.measureText(banner).width > width - 24 * dpr ? banner.split(' ') : [banner];
+    const lineHeight = Math.max(bannerFont * 1.1, Math.min(unit * 0.25, 44 * dpr));
+    lines.forEach((line, index) => {
+      g.fillText(line, width / 2, unit * 0.5 + (index - (lines.length - 1) / 2) * lineHeight, width - 20 * dpr);
+    });
   }
 }
 
@@ -179,10 +181,33 @@ function create(ctx) {
   let lastTime = 0;
   const p2Keys = { up: false, down: false };
 
+  function gameLayout() {
+    const { width, height } = ctx.size();
+    const w = Math.max(1, width);
+    const h = Math.max(1, height);
+    if (w < 280 || h < 180) return null;
+    const compact = w < 720;
+    const margin = 8;
+    const gap = 8;
+    const barWidth = w - 2 * margin;
+    if (compact) {
+      const status = rect(margin / w, margin / h, barWidth / w, 38 / h);
+      const controls = rect(margin / w, 54 / h, barWidth / w, 48 / h);
+      const [pause, restart, menu] = columns(controls, [1, 1, 1], gap / w);
+      const field = rect(margin / w, 110 / h, barWidth / w, (h - 118) / h);
+      return { status, pause, restart, menu, field };
+    }
+    const bar = rect(margin / w, margin / h, barWidth / w, 48 / h);
+    const [status, pause, restart, menu] = columns(bar, [3, 1.2, 1.3, 1.1], gap / w);
+    const field = rect(margin / w, 64 / h, barWidth / w, (h - 72) / h);
+    return { status, pause, restart, menu, field };
+  }
+
   function fieldAspect() {
     const { width, height } = ctx.size();
-    const w = width * FIELD.width;
-    const h = height * FIELD.height;
+    const field = gameLayout()?.field;
+    const w = width * (field?.width ?? 0.96);
+    const h = height * (field?.height ?? 0.75);
     return w > 0 && h > 0 ? w / h : 1.6;
   }
 
@@ -218,22 +243,34 @@ function create(ctx) {
   return {
     widgets() {
       if (!mode) {
-        const [title, hint, choices] = rows(inset(rect(0, 0, 1, 1), 0.06), [1.3, 0.9, 1.4], 0.05);
-        const [solo, duo] = columns(choices, [1, 1], 0.04);
+        const { width, height } = ctx.size();
+        if (width < 280 || height < 180) {
+          return [text('hint', rect(0.06, 0.1, 0.88, 0.8), 'Expand window to play Pong', ['title', 'muted'])];
+        }
+        const stacked = width < 460 && height >= 230;
+        const [title, hint, choices] = rows(inset(rect(0, 0, 1, 1), 0.04), [1.2, 1, stacked ? 2.2 : 1.2], 0.025);
+        const [solo, duo] = stacked ? rows(choices, [1, 1], 8 / height) : columns(choices, [1, 1], 8 / width);
         return [
           text('title', title, 'PONG', ['huge', 'accent-text']),
-          text('hint', hint, 'Player 1 moves the left paddle with the pointer. Player 2 uses the Up and Down arrow keys.', ['small', 'muted']),
-          button('play-ai', solo, '1 player', ['primary', 'large'], { icon: 'cpu' }),
-          button('play-two', duo, '2 players', 'large', { icon: 'users' }),
+          text('hint', hint, width < 500 ? 'Pointer: left paddle. Up / Down: right.' : 'Player 1 moves the left paddle with the pointer. Player 2 uses the Up and Down arrow keys.', ['small', 'muted']),
+          button('play-ai', solo, '1 player', 'primary', { icon: 'cpu' }),
+          button('play-two', duo, '2 players', undefined, { icon: 'users' }),
         ];
       }
-      const [status, pause, restart, menu] = columns(TOP_BAR, [3, 1.2, 1.3, 1.1], 0.015);
+      const layout = gameLayout();
+      if (!layout) {
+        return [
+          text('expand', rect(0.06, 0.04, 0.88, 0.46), 'Expand window to play Pong', ['title', 'muted']),
+          button('menu', rect(0.08, 0.54, 0.84, 0.4), 'Menu', 'subtle'),
+        ];
+      }
+      const { status, pause, restart, menu, field } = layout;
       return [
         text('status', status, mode === 'ai' ? 'You vs Computer' : 'Pointer vs Arrow keys', 'chip', { icon: mode === 'ai' ? 'cpu' : 'users' }),
         button('pause', pause, paused ? 'Resume' : 'Pause', 'subtle', { icon: paused ? 'play' : 'pause', disabled: !!game?.winner }),
         button('restart', restart, game?.winner ? 'Again' : 'Restart', game?.winner ? 'primary' : 'subtle', { icon: 'reset' }),
         button('menu', menu, 'Menu', 'ghost', { icon: 'home' }),
-        { id: 'field', type: 'canvas', ...FIELD },
+        { id: 'field', type: 'canvas', ...field },
       ];
     },
     afterRender() {
@@ -251,9 +288,11 @@ function create(ctx) {
     // The left paddle follows the pointer's height anywhere over the field.
     handlePointer(event) {
       if (!game || event.type !== 'pointer_move' && event.type !== 'pointer_down') return false;
-      const inside = event.x >= FIELD.x && event.x <= FIELD.x + FIELD.width && event.y >= FIELD.y && event.y <= FIELD.y + FIELD.height;
+      const field = gameLayout()?.field;
+      if (!field) return false;
+      const inside = event.x >= field.x && event.x <= field.x + field.width && event.y >= field.y && event.y <= field.y + field.height;
       if (!inside) return false;
-      game.left.target = clampPaddle((event.y - FIELD.y) / FIELD.height);
+      game.left.target = clampPaddle((event.y - field.y) / field.height);
       return true;
     },
     handleKey(event) {

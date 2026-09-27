@@ -1,4 +1,4 @@
-import {clamp, rectBetween, validRect, homography, project, unproject, cssMatrix, quadValid, polygonsOverlap} from './geometry.js';
+import {clamp, rectBetween, validRect, homography, project, unproject, cssMatrix, surfacePixelSize, quadValid, polygonsOverlap} from './geometry.js';
 import {createDwellTracker,DWELL_MS} from './dwell.js';
 import {markerLayout,drawMarkers} from './markers.js';
 
@@ -10,10 +10,7 @@ const editControls=$('edit-controls');
 let surfaces=[], draft=[[.11,.22],[.89,.22],[.89,.83],[.11,.83]], windows=[], nextId=1;
 let phase='calibration', mode='idle', action=null, interaction=null, operation=null, selectedId=null;
 let activeId=null, renderer=null, sourceId=null, destinationId=null, cameraStep=null, pendingImage=null;
-<<<<<<< HEAD
 let setupDrag=null, hoveredHandWindowId=null;
-=======
-let setupDrag=null;
 // Move and resize remember the window's starting bounds so Cancel can restore them.
 let editBase=null;
 const EDIT_MODES=['move-ready','moving','resize-ready','resizing','resizing-hands'];
@@ -21,7 +18,6 @@ const EDIT_MODES=['move-ready','moving','resize-ready','resizing','resizing-hand
 // scrolls at SCROLL_GAIN times the finger's movement.
 const PICKER_STEP=.08,SCROLL_GAIN=.5;
 let pickerScroll={id:null,travel:0};
->>>>>>> 321d8791f919d587828649611d2d73de2b03b4c1
 // Surface numbers are never reused after a close. Hand alignment covers surfaces from alignStart on.
 let nextSurface=1, alignStart=0;
 const HOLD_S=DWELL_MS/1000;
@@ -320,6 +316,7 @@ function render(){
   const oldPlanes=new Map([...surfacesLayer.children].map(p=>[p.dataset.surfaceId,p]));
   const oldFrames=new Map([...surfacesLayer.querySelectorAll('.surface-window')].map(f=>[f.dataset.windowId,f]));
   for(const s of surfaces){
+    const size=surfacePixelSize(s.corners,width,height);
     let plane=oldPlanes.get(s.id);oldPlanes.delete(s.id);
     if(!plane){
       plane=document.createElement('div');plane.className='surface-plane';plane.dataset.surfaceId=s.id;
@@ -327,8 +324,8 @@ function render(){
       surfacesLayer.append(plane);
     }
     plane.dataset.surface=String((s.number-1)%4+1);
-    plane.style.width=`${width}px`;plane.style.height=`${height}px`;
-    plane.style.transform=`matrix3d(${cssMatrix(s.h,width,height).join(',')})`;
+    plane.style.width=`${size.width}px`;plane.style.height=`${size.height}px`;
+    plane.style.transform=`matrix3d(${cssMatrix(s.h,size.width,size.height,width,height).join(',')})`;
     for(const w of windows.filter(w=>w.surface_id===s.id)){
       const isApp=!!renderer?.apps?.some(a=>a.type===w.content);
       let frame=oldFrames.get(w.id);oldFrames.delete(w.id);
@@ -508,9 +505,12 @@ function proposedResize(base,corner,dx,dy){let x=base.x,y=base.y,right=base.x+ba
   if(corner.includes('n'))y+=dy;else bottom+=dy;
   return {x,y,width:right-x,height:bottom-y};}
 function deliverContent(w,e){const s=surfaceById(w.surface_id),p=local(s,e);if(!p)return;
-  const yTop=w.y+42/stage.clientHeight;
   const host=document.querySelector(`[data-window-id="${w.id}"] .widget-host`);if(!host)return;
-  host.dispatchEvent(new CustomEvent('surfaceos:window-pointer',{bubbles:true,detail:{version:1,type:e.type,source:e.source,window_id:w.id,x:(p.x-w.x)/w.width,y:(p.y-yTop)/(w.height-42/stage.clientHeight),dy:e.dy}}));
+  if(!host.clientWidth||!host.clientHeight)return;
+  const frame=host.closest('.surface-window'),plane=frame.parentElement;
+  const x=(p.x*plane.clientWidth-frame.offsetLeft-host.offsetLeft)/host.clientWidth;
+  const y=(p.y*plane.clientHeight-frame.offsetTop-host.offsetTop)/host.clientHeight;
+  host.dispatchEvent(new CustomEvent('surfaceos:window-pointer',{bubbles:true,detail:{version:1,type:e.type,source:e.source,window_id:w.id,x,y,dy:e.dy}}));
 }
 // Shell buttons (not widget-renderer buttons, which take pointer events themselves), target picking,
 // and the program picker are clicks. Everything else a hand presses on starts a drag.
@@ -558,13 +558,9 @@ function handleInput(raw,target=null){
     if(mode==='content'&&interaction){const w=windowById(interaction.id);if(w)deliverContent(w,{...interaction.last,type:'pointer_cancel'});}
     if(mode==='resizing-hands'){const w=windowById(interaction?.id);if(w)Object.assign(w,interaction.base);mode='resize-ready';interaction=null;render();}
     if(mode==='drawing'||mode==='moving'||mode==='resizing'){mode=mode==='drawing'?'armed':interaction?.returnMode||'idle';interaction=null;outline.hidden=true;render();}
-<<<<<<< HEAD
     if(raw.source==='hand')setHandHover(null);
-    cursor.hidden=true;return true;
-=======
     if(raw.type==='pointer_cancel')cursor.hidden=true;
     return true;
->>>>>>> 321d8791f919d587828649611d2d73de2b03b4c1
   }
   // A gesture menu never interrupts drawing, moving, or resizing.
   const busy=['armed','drawing',...EDIT_MODES].includes(mode);

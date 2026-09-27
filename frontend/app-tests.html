@@ -534,6 +534,45 @@
     app.destroy();
   });
 
+  await test("Pong controls remain targetable after a small window resize", async () => {
+    const { app, box, warnings } = mount("pong", 640, 420);
+    press(app, box, "play-ai"); await tick();
+    box.style.width = "280px";
+    box.style.height = "180px";
+    // Force a render after sizing so the geometry check also runs in headless browsers
+    // that suspend ResizeObserver delivery for this offscreen test container.
+    app.handleKey({ type: "keydown", key: " " });
+    app.handleKey({ type: "keydown", key: " " });
+    await tick();
+    const controls = ["pause", "restart", "menu"].map((id) => box.querySelector(`[data-widget-id="${id}"]`));
+    const field = box.querySelector('[data-widget-id="field"]');
+    assertEqual(controls.every((control) => control && control.getBoundingClientRect().height >= 44), true, "44px Pong controls");
+    assertEqual(controls.every((control) => control.getBoundingClientRect().bottom <= field.getBoundingClientRect().top), true, "controls do not overlap field");
+    press(app, box, "pause"); await tick();
+    assertEqual(textOf(box, "pause"), "Resume", "pointer activation after resize");
+    const x = (parseFloat(field.style.left) + parseFloat(field.style.width) / 2) / 100;
+    const y = (parseFloat(field.style.top) + parseFloat(field.style.height) / 2) / 100;
+    assertEqual(app.handlePointer({ version: 1, type: "pointer_move", x, y, source: "mouse" }), true, "pointer follows resized field");
+    assertEqual(warnings, []);
+    app.destroy();
+    box.remove();
+  });
+
+  await test("Notepad keeps readable controls in a compact window", async () => {
+    const { app, box, warnings } = mount("notepad", 280, 180);
+    const controls = ["dictate", "newline", "undo", "clear"].map((id) => box.querySelector(`[data-widget-id="${id}"]`));
+    const page = box.querySelector('[data-widget-id="page"]');
+    assertEqual(controls.every((control) => control && control.getBoundingClientRect().height >= 44), true, "44px Notepad controls");
+    assertEqual(page.getBoundingClientRect().bottom < controls[0].getBoundingClientRect().top, true, "note body clears controls");
+    assertEqual(parseFloat(getComputedStyle(page).fontSize) >= 18, true, "readable note body");
+    app.receiveText("hello"); await tick();
+    press(app, box, "newline"); await tick();
+    assertEqual(textOf(box, "page"), "Hello\n", "pointer activation in compact layout");
+    assertEqual(warnings, []);
+    app.destroy();
+    box.remove();
+  });
+
   const summary = document.getElementById("summary");
   summary.textContent = failures === 0 ? "ALL TESTS PASSED" : `${failures} TEST(S) FAILED`;
   summary.className = failures === 0 ? "pass" : "fail";

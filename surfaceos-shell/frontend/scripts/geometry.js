@@ -34,10 +34,21 @@ export function unproject(h,x,y) {
   if(Math.abs(det)<1e-10) return null;
   return {x:(c*e-b*f)/det,y:(a*f-c*d)/det};
 }
-export function cssMatrix(h,width,height) {
-  // Local surface pixels use the stage's dimensions; output coordinates are stage pixels.
-  return [h[0],h[3]*height/width,0,h[6]/width,
-    h[1]*width/height,h[4],0,h[7]/height,0,0,1,0,h[2]*width,h[5]*height,0,1];
+export function surfacePixelSize(corners,stageWidth,stageHeight) {
+  const edge=(a,b)=>Math.hypot(
+    (corners[a][0]-corners[b][0])*stageWidth,
+    (corners[a][1]-corners[b][1])*stageHeight,
+  );
+  return {
+    width:(edge(0,1)+edge(3,2))/2,
+    height:(edge(0,3)+edge(1,2))/2,
+  };
+}
+export function cssMatrix(h,localWidth,localHeight,stageWidth=localWidth,stageHeight=localHeight) {
+  // Map local surface pixels into stage pixels without shrinking the entire UI with the quad.
+  return [h[0]*stageWidth/localWidth,h[3]*stageHeight/localWidth,0,h[6]/localWidth,
+    h[1]*stageWidth/localHeight,h[4]*stageHeight/localHeight,0,h[7]/localHeight,
+    0,0,1,0,h[2]*stageWidth,h[5]*stageHeight,0,1];
 }
 export function quadValid(c) {
   try {

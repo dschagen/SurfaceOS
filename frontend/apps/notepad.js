@@ -8,6 +8,7 @@ function create(ctx) {
   const history = [];
   let confirmClear = false;
   let cancelConfirm = null;
+  let lastRenderedContent = null;
   const dictation = createDictationControl(ctx, (spoken) => append(spoken));
 
   function remember() {
@@ -25,14 +26,34 @@ function create(ctx) {
 
   return {
     widgets() {
-      const area = inset(rect(0, 0, 1, 1), 0.035);
-      const [page, status, controls] = rows(area, [6, 0.6, 1.15], 0.025);
-      const widgets = [
-        text('page', page, content || 'Tap Dictate and start talking.', ['paper', 'tail', 'pre', ...(content ? [] : ['muted'])]),
-      ];
+      const { width, height } = ctx.size();
+      if (width < 280 || height < 180) {
+        return [text('page', rect(0.04, 0.04, 0.92, 0.92), content || 'Expand window to edit note.', ['paper', 'scroll', 'pre', ...(content ? [] : ['muted'])])];
+      }
+      const marginX = Math.min(12, width * 0.035);
+      const marginY = Math.min(12, height * 0.035);
+      const gap = height < 240 ? 6 : 8;
+      const area = inset(rect(0, 0, 1, 1), marginX / width, marginY / height);
       const statusText = dictation.status();
+      const stacked = width < 320 || (width < 420 && height >= 260);
+      const controlsHeight = stacked ? (height < 240 ? 94 : 104) : 48;
+      const statusHeight = statusText ? 24 : 0;
+      const pageHeight = height * area.height - controlsHeight - statusHeight - gap * (statusText ? 2 : 1);
+      const page = rect(area.x, area.y, area.width, pageHeight / height);
+      const status = rect(area.x, page.y + page.height + gap / height, area.width, statusHeight / height);
+      const controls = rect(area.x, area.y + area.height - controlsHeight / height, area.width, controlsHeight / height);
+      const widgets = [
+        text('page', page, content || 'Tap Dictate and start talking.', ['paper', 'scroll', 'pre', ...(content ? [] : ['muted'])]),
+      ];
       if (statusText) widgets.push(text('status', status, statusText, ['left', 'small', dictation.error ? 'error' : 'muted']));
-      const [dictate, newline, undo, clear] = columns(controls, [1.5, 1, 1, 1], 0.025);
+      let dictate, newline, undo, clear;
+      if (stacked) {
+        const [firstRow, secondRow] = rows(controls, [1, 1], gap / height);
+        [dictate, newline] = columns(firstRow, [1.5, 1], gap / width);
+        [undo, clear] = columns(secondRow, [1, 1], gap / width);
+      } else {
+        [dictate, newline, undo, clear] = columns(controls, [1.5, 1, 1, 1], gap / width);
+      }
       widgets.push(
         button('dictate', dictate, dictation.buttonText(), dictation.listening ? 'listening' : 'primary', { icon: dictation.listening ? 'stop' : 'mic' }),
         button('newline', newline, 'Line', undefined, { icon: 'new-line', disabled: !content }),
@@ -40,6 +61,13 @@ function create(ctx) {
         button('clear', clear, confirmClear ? 'Sure?' : 'Clear', 'danger', { icon: 'trash', disabled: !content }),
       );
       return widgets;
+    },
+    afterRender() {
+      const page = ctx.element('page');
+      if (page && content !== lastRenderedContent) {
+        page.scrollTop = page.scrollHeight;
+        lastRenderedContent = content;
+      }
     },
     handleAction({ widget_id: id }) {
       if (id === 'dictate') dictation.toggle();
