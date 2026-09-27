@@ -2,10 +2,12 @@ import {clamp, rectBetween, validRect, homography, project, unproject, cssMatrix
 
 const $ = id => document.getElementById(id);
 const stage=$('stage'), surfacesLayer=$('surfaces'), setup=$('setup'), calibration=$('calibration');
+const setupDragHandle=$('setup-drag-handle');
 const dialog=$('dialog'), actions=$('actions'), outline=$('outline'), cursor=$('cursor'), labels=$('surface-labels');
 let surfaces=[], draft=[[.11,.22],[.89,.22],[.89,.83],[.11,.83]], windows=[], nextId=1;
 let phase='calibration', mode='idle', action=null, interaction=null, operation=null, selectedId=null;
 let activeId=null, renderer=null, sourceId=null, destinationId=null, cameraStep=null, pendingImage=null;
+let setupDrag=null;
 const inset=.09;
 const status=message=>{$('status').textContent=message;};
 const stageSize=()=>({width:stage.clientWidth,height:stage.clientHeight});
@@ -30,6 +32,16 @@ function prompt(title,description,choices){
 }
 function closePrompt(){dialog.hidden=true;}
 function setSetupMessage(text){$('setup-message').textContent=text;}
+function positionSetup(left,top){
+  setup.classList.add('is-moved');
+  setup.style.left=`${clamp(left,0,Math.max(0,stage.clientWidth-setup.offsetWidth))}px`;
+  setup.style.top=`${clamp(top,0,Math.max(0,stage.clientHeight-setup.offsetHeight))}px`;
+}
+function keepSetupVisible(){
+  if(setup.hidden||!setup.classList.contains('is-moved'))return;
+  const stageRect=stage.getBoundingClientRect(),rect=setup.getBoundingClientRect();
+  positionSetup(rect.left-stageRect.left,rect.top-stageRect.top);
+}
 function setupPreview(){
   calibration.replaceChildren();
   if(phase==='calibration'){
@@ -463,6 +475,28 @@ $('actions-button').addEventListener('click',()=>confirm('Open main actions?','S
 $('manage-button').addEventListener('click',()=>confirm('Manage windows?','Open Move and Resize options.',manageMenu));
 $('close-button').addEventListener('click',()=>management('close'));
 $('fullscreen').addEventListener('click',()=>document.fullscreenElement?document.exitFullscreen():stage.requestFullscreen?.());
+setupDragHandle.addEventListener('pointerdown',e=>{
+  if(e.pointerType==='mouse'&&e.button!==0)return;
+  const stageRect=stage.getBoundingClientRect(),rect=setup.getBoundingClientRect();
+  setupDrag={pointerId:e.pointerId,startX:e.clientX,startY:e.clientY,left:rect.left-stageRect.left,top:rect.top-stageRect.top};
+  positionSetup(setupDrag.left,setupDrag.top);
+  setupDragHandle.setPointerCapture(e.pointerId);
+  e.preventDefault();e.stopPropagation();
+});
+setupDragHandle.addEventListener('pointermove',e=>{
+  if(setupDrag?.pointerId!==e.pointerId)return;
+  positionSetup(setupDrag.left+e.clientX-setupDrag.startX,setupDrag.top+e.clientY-setupDrag.startY);
+  e.stopPropagation();
+});
+function finishSetupDrag(e){
+  if(setupDrag?.pointerId!==e.pointerId)return;
+  setupDrag=null;
+  if(setupDragHandle.hasPointerCapture(e.pointerId))setupDragHandle.releasePointerCapture(e.pointerId);
+  e.stopPropagation();
+}
+setupDragHandle.addEventListener('pointerup',finishSetupDrag);
+setupDragHandle.addEventListener('pointercancel',finishSetupDrag);
+setupDragHandle.addEventListener('lostpointercapture',()=>{setupDrag=null;});
 calibration.addEventListener('pointerdown',e=>{
   if(phase!=='calibration')return;
   const handle=e.target.closest('[data-corner]');if(!handle)return;
@@ -496,11 +530,11 @@ document.addEventListener('keydown',e=>{
   if(phase==='workspace'&&mode==='idle'&&activeId&&renderer?.handleKey?.(activeId,{type:'keydown',key:e.key}))e.preventDefault();
 });
 document.addEventListener('keyup',e=>{if(phase==='workspace'&&mode==='idle'&&activeId)renderer?.handleKey?.(activeId,{type:'keyup',key:e.key});});
-window.addEventListener('resize',render);
+window.addEventListener('resize',()=>{keepSetupVisible();render();});
 window.SurfaceOS=Object.freeze({
   dispatchInput:event=>handleInput(event),
   mountWidgetRenderer(value){if(!value||typeof value.renderLayout!=='function')throw new TypeError('Expected renderer');renderer=value;render();},
   getState:()=>({phase,mode,surfaces:structuredClone(surfaces),windows:structuredClone(windows)}),
-  reset:()=>{surfaces=[];windows=[];nextId=1;activeId=null;mode='idle';action=null;interaction=null;pendingImage=null;draft=[[.11,.22],[.89,.22],[.89,.83],[.11,.83]];showCalibration();},
+  reset:()=>{surfaces=[];windows=[];nextId=1;activeId=null;mode='idle';action=null;interaction=null;pendingImage=null;setupDrag=null;setup.classList.remove('is-moved');setup.style.left='';setup.style.top='';draft=[[.11,.22],[.89,.22],[.89,.83],[.11,.83]];showCalibration();},
 });
 showCalibration();
