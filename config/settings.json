@@ -1,8 +1,9 @@
 {
   "camera": {
     "index": 1,
-    "width": null,
-    "height": null
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
   },
   "tracking": {
     "max_hands": 2,

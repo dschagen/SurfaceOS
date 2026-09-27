@@ -1,5 +1,6 @@
 import {clamp, rectBetween, validRect, homography, project, unproject, cssMatrix, quadValid, polygonsOverlap} from './geometry.js';
-import {createDwellTracker} from './dwell.js';
+import {createDwellTracker,DWELL_MS} from './dwell.js';
+import {markerLayout,drawMarkers} from './markers.js';
 
 const $ = id => document.getElementById(id);
 const stage=$('stage'), surfacesLayer=$('surfaces'), setup=$('setup'), calibration=$('calibration');
@@ -7,7 +8,19 @@ const dialog=$('dialog'), actions=$('actions'), outline=$('outline'), cursor=$('
 let surfaces=[], draft=[[.11,.22],[.89,.22],[.89,.83],[.11,.83]], windows=[], nextId=1;
 let phase='calibration', mode='idle', action=null, interaction=null, operation=null, selectedId=null;
 let activeId=null, renderer=null, sourceId=null, destinationId=null, cameraStep=null, pendingImage=null;
-const inset=.09;
+const HOLD_S=DWELL_MS/1000;
+// Surface-local positions of the fingertip target C and the verification target OK.
+const FINGER_POINT=[.5,.5],CHECK_POINT=[.5,.22];
+// The uncorrected pointer must be this close to C, in surface-local units, before a hold counts.
+const FINGER_RADIUS=.15;
+// How close, in projector units, the corrected pointer must be to OK for a hold to accept.
+const CHECK_RADIUS=.05;
+// Time for the projected markers to reach the camera before the tracker starts looking.
+const MARKER_SETTLE_MS=600;
+const MARKER_TIMEOUT_MS=8000;
+// Hand points this far outside a surface, in surface-local units, still map onto it.
+const EDGE_MARGIN=.04;
+let markerToken=0;
 const status=message=>{$('status').textContent=message;};
 const stageSize=()=>({width:stage.clientWidth,height:stage.clientHeight});
 const fromClient=(x,y)=>({x:clamp((x-stage.getBoundingClientRect().left)/stage.clientWidth,0,1),y:clamp((y-stage.getBoundingClientRect().top)/stage.clientHeight,0,1)});
@@ -30,6 +43,12 @@ function prompt(title,description,choices){
   row.firstElementChild?.focus();
 }
 function closePrompt(){dialog.hidden=true;}
+// Raw rings show uncalibrated camera positions; calibrated rings are colored by surface number.
+function showCursor(p,surfaceNumber=null,raw=false){
+  cursor.hidden=false;cursor.style.left=`${p.x*100}%`;cursor.style.top=`${p.y*100}%`;
+  cursor.classList.toggle('raw',raw);
+  cursor.dataset.surface=surfaceNumber?String((surfaceNumber-1)%4+1):'none';
+}
 function setSetupMessage(text){$('setup-message').textContent=text;}
 function setupPreview(){
   calibration.replaceChildren();
@@ -44,18 +63,22 @@ function setupPreview(){
       handle.textContent=String(i+1);handle.title=`Corner ${i+1}: drag onto the physical surface`;
       calibration.append(handle);
     });
-  }else if(phase==='camera'||phase==='camera-check'){
+  }else if(phase==='markers'){
     calibration.hidden=false;
-    const s=surfaces[cameraStep.surface];
-    const points=[[inset,inset],[1-inset,inset],[1-inset,1-inset],[inset,1-inset]];
-    const check=phase==='camera-check';
-    const p=project(s.h,...(check?[.5,.5]:points[cameraStep.corner]));
-    if(!check){
-      const ring=document.createElement('div');ring.className='dwell-ring';ring.id='dwell-ring';
-      ring.style.left=`${p.x*100}%`;ring.style.top=`${p.y*100}%`;
-      calibration.append(ring);
-    }
-    const marker=document.createElement('div');marker.className='camera-target';marker.style.left=`${p.x*100}%`;marker.style.top=`${p.y*100}%`;marker.textContent=check?'C':String(cameraStep.corner+1);
+    const s=surfaces[cameraStep.surface],{width,height}=stageSize();
+    const plane=document.createElement('canvas');plane.className='marker-plane';plane.width=width;plane.height=height;
+    plane.style.width=`${width}px`;plane.style.height=`${height}px`;
+    plane.style.transform=`matrix3d(${cssMatrix(s.h,width,height).join(',')})`;
+    drawMarkers(plane.getContext('2d'),cameraStep.layout,width,height);
+    calibration.append(plane);
+  }else if(phase==='finger'||phase==='camera-check'){
+    calibration.hidden=false;
+    const s=surfaces[cameraStep.surface],check=phase==='camera-check';
+    const p=project(s.h,...(check?CHECK_POINT:FINGER_POINT));
+    const ring=document.createElement('div');ring.className='dwell-ring';ring.id='dwell-ring';
+    ring.style.left=`${p.x*100}%`;ring.style.top=`${p.y*100}%`;
+    calibration.append(ring);
+    const marker=document.createElement('div');marker.className='camera-target';marker.style.left=`${p.x*100}%`;marker.style.top=`${p.y*100}%`;marker.textContent=check?'OK':'C';
     calibration.append(marker);
   }else calibration.hidden=true;
 }
@@ -80,24 +103,122 @@ function confirmSurface(){
   $('confirm-surface').hidden=true;$('add-surface').hidden=false;$('finish-setup').hidden=false;
   setSetupMessage('Projector geometry is mapped. Camera input alignment comes next.');
 }
-function startCameraAlignment(){
-  phase='camera';cameraStep={surface:0,corner:0,samples:[],tracker:createDwellTracker(),pinching:false};
-  setup.hidden=false;actions.hidden=true;setup.querySelector('h1').firstChild.textContent='Align hand input · surface ';
-  $('surface-number').textContent='1';
-  setup.querySelector('p:not(.eyebrow)').textContent='Point your index fingertip at each projected target and hold still for 3 seconds. Do not pinch.';
-  $('confirm-surface').hidden=true;$('add-surface').hidden=true;$('finish-setup').hidden=false;
-  $('accept-alignment').hidden=true;$('retry-alignment').hidden=true;
-  $('finish-setup').textContent='Skip hand alignment';
-  setSetupMessage('Hand tracker required. Mouse testing can skip this step.');setupPreview();
-  status('Hold at target 1 for 3 seconds');
+function alignmentText(title,description){
+  setup.hidden=false;actions.hidden=true;
+  setup.querySelector('h1').firstChild.textContent=title;
+  $('surface-number').textContent=String(cameraStep.surface+1);
+  setup.querySelector('p:not(.eyebrow)').textContent=description;
+}
+function alignmentButtons({skip=false,accept=false,retry=false}){
+  $('confirm-surface').hidden=true;$('add-surface').hidden=true;
+  $('finish-setup').hidden=!skip;$('finish-setup').textContent='Skip hand alignment';
+  $('accept-alignment').hidden=!accept;$('retry-alignment').hidden=!retry;
+}
+function startCameraAlignment(){cameraStep={surface:0};runMarkers();}
+// Projects a marker grid on the current surface and asks the tracker to find it in the camera image.
+async function runMarkers(){
+  const s=surfaces[cameraStep.surface],{width,height}=stageSize(),token=++markerToken;
+  clearTimeout(cameraStep.timer);
+  s.camera=null;s.fingerOffset=null;s.cameraError=null;
+  // Size the grid by the surface's projected edge lengths so markers land square on the surface.
+  const edge=(a,b)=>Math.hypot((s.corners[a][0]-s.corners[b][0])*width,(s.corners[a][1]-s.corners[b][1])*height);
+  const layout=markerLayout((edge(0,1)+edge(3,2))/2,(edge(0,3)+edge(1,2))/2);
+  Object.assign(cameraStep,{layout,tracker:null,checkTracker:null,pinching:false});
+  phase='markers';cursor.hidden=true;stage.classList.add('marker-capture');
+  alignmentText('Camera alignment · surface ','Keep hands and objects off the surface while the camera reads the projected markers.');
+  alignmentButtons({skip:true});setSetupMessage('Reading markers.');status(`Reading markers on surface ${s.number}`);
+  setupPreview();
+  await nextFrame();await new Promise(resolve=>setTimeout(resolve,MARKER_SETTLE_MS));
+  if(phase!=='markers'||token!==markerToken)return;
+  if(!window.SurfaceOSHand){markerFailed('This page loaded an outdated script. Reload with Ctrl+Shift+R, then set up again.');return;}
+  const sent=window.SurfaceOSHand.send({version:1,type:'calibration_request',surface_id:s.id,markers:cameraStep.layout});
+  if(!sent){markerFailed('The hand tracker is not connected. Start python src/main.py and retry, or skip to use the mouse.');return;}
+  cameraStep.timer=setTimeout(()=>{
+    if(phase==='markers'&&token===markerToken)markerFailed('The hand tracker did not answer. Check that it is running, then retry.');
+  },MARKER_TIMEOUT_MS);
+}
+function markerFailed(reason){
+  clearTimeout(cameraStep.timer);markerToken++;
+  phase='marker-failed';stage.classList.remove('marker-capture');
+  alignmentText('Camera alignment failed · surface ',reason);
+  alignmentButtons({skip:true,retry:true});
+  setSetupMessage('Fix the problem, then retry this surface.');status('Camera alignment failed');setupPreview();
+}
+function handleCalibrationResult(result){
+  const s=surfaces[cameraStep?.surface];
+  if(phase!=='markers'||!s||result.surface_id!==s.id)return;
+  clearTimeout(cameraStep.timer);markerToken++;stage.classList.remove('marker-capture');
+  if(!result.ok){markerFailed(result.reason||'The camera could not read the markers.');return;}
+  if(!Array.isArray(result.camera)||result.camera.length!==9||!result.camera.every(Number.isFinite)){
+    markerFailed('The tracker sent an invalid calibration. Retry this surface.');return;
+  }
+  s.camera=[...result.camera];s.cameraError=Number.isFinite(result.error_px)?result.error_px:null;
+  startFinger();
+}
+function startFinger(){
+  const s=surfaces[cameraStep.surface];
+  phase='finger';cameraStep.tracker=createDwellTracker();cameraStep.pinching=false;
+  alignmentText('Fingertip check · surface ',`Touch the center C with your index fingertip and hold still for ${HOLD_S} seconds. This corrects for where the tracker places your fingertip.`);
+  alignmentButtons({retry:true});
+  setSetupMessage(`Camera alignment done${s.cameraError!=null?` (${s.cameraError} px error)`:''}. Now hold on C.`);
+  status(`Hold on C for ${HOLD_S} seconds`);setupPreview();
+}
+// Surface-local point for a camera-normalized point, with the fingertip correction unless raw.
+function cameraToLocal(s,point,corrected=true){
+  const offset=(corrected&&s.fingerOffset)||{x:0,y:0};
+  return unproject(s.camera,point.x-offset.x,point.y-offset.y);
+}
+function updateFingerDwell(raw){
+  const s=surfaces[cameraStep.surface],q=cameraToLocal(s,raw,false),ring=$('dwell-ring');
+  if(!q)return;
+  showCursor(project(s.h,q.x,q.y),s.number);
+  if(Math.hypot(q.x-FINGER_POINT[0],q.y-FINGER_POINT[1])>FINGER_RADIUS){
+    cameraStep.tracker.cancel();if(ring)ring.style.setProperty('--progress','0%');
+    setSetupMessage(`Touch C with your fingertip and hold still for ${HOLD_S} seconds.`);return;
+  }
+  const result=cameraStep.tracker.update(raw,performance.now());
+  if(ring)ring.style.setProperty('--progress',`${result.progress*100}%`);
+  if(result.phase==='holding')setSetupMessage(`Holding on C · ${Math.max(0,Math.ceil(HOLD_S*(1-result.progress)))} seconds left.`);
+  if(result.phase!=='complete')return;
+  // The markers fix the surface plane; this offset moves the fingertip landmark onto the touch point.
+  const expected=project(s.camera,...FINGER_POINT);
+  s.fingerOffset={x:result.sample[0]-expected.x,y:result.sample[1]-expected.y};
+  startCheck();
+}
+function startCheck(){
+  phase='camera-check';cameraStep.checkTracker=createDwellTracker();cameraStep.pinching=false;
+  alignmentText('Check alignment · surface ',`The colored ring should sit under your fingertip anywhere on the surface. Hold on OK for ${HOLD_S} seconds to accept, or give a thumbs down to retry.`);
+  alignmentButtons({accept:true,retry:true});
+  setSetupMessage(`Hold on OK for ${HOLD_S} seconds to accept. Thumbs down retries. The laptop controls also work.`);
+  status('Check the ring, then hold on OK');setupPreview();
+}
+function updateCheckDwell(p){
+  const s=surfaces[cameraStep.surface],target=project(s.h,...CHECK_POINT),ring=$('dwell-ring');
+  if(Math.hypot(p.x-target.x,p.y-target.y)>CHECK_RADIUS){
+    cameraStep.checkTracker.cancel();if(ring)ring.style.setProperty('--progress','0%');
+    setSetupMessage(`Move the ring onto OK and hold for ${HOLD_S} seconds to accept, or give a thumbs down to retry.`);return;
+  }
+  const result=cameraStep.checkTracker.update(p,performance.now());
+  if(ring)ring.style.setProperty('--progress',`${result.progress*100}%`);
+  if(result.phase==='complete'){acceptCameraAlignment();return;}
+  if(result.phase==='holding')setSetupMessage(`Holding on OK · ${Math.max(0,Math.ceil(HOLD_S*(1-result.progress)))} seconds left to accept.`);
+}
+function retryCameraAlignment(){if(cameraStep)runMarkers();}
+function acceptCameraAlignment(){
+  if(phase!=='camera-check')return;
+  cameraStep.surface++;cursor.hidden=true;
+  if(cameraStep.surface===surfaces.length){enterWorkspace();status('Hand alignment complete');return;}
+  runMarkers();
 }
 function finishSetup(){
   if(phase==='choice'){
-    prompt('Align hand input?','This maps camera points to the projected surfaces. Hold your finger still at each target for 3 seconds, or continue with a mouse.',[
+    prompt('Align hand input?',`The camera reads projected markers on each surface, then you hold your fingertip on C and OK for ${HOLD_S} seconds each. Or continue with a mouse.`,[
       ['Align hands',startCameraAlignment],['Continue with mouse',enterWorkspace]]);
   }else enterWorkspace();
 }
 function enterWorkspace(){
+  if(cameraStep){clearTimeout(cameraStep.timer);markerToken++;}
+  stage.classList.remove('marker-capture');cursor.hidden=true;
   phase='workspace';mode='idle';setup.hidden=true;calibration.hidden=true;actions.hidden=false;closePrompt();
   $('actions-button').hidden=false;$('manage-button').hidden=false;$('close-button').hidden=false;
   $('finish-setup').textContent='Enter workspace';render();status('Choose New Window, Screenshot, or Ask AI');
@@ -106,66 +227,26 @@ function addSurface(){
   draft=[[.36,.35],[.64,.35],[.64,.65],[.36,.65]];
   showCalibration();setSetupMessage('Drag all four points to an unused part of the same projector beam.');
 }
+// Projector point for a hand on a calibrated surface. Points just outside the edge snap onto it.
 function getMappedHandPoint(raw){
   let best=null,score=Infinity;
   for(const s of surfaces){
     if(!s.camera) continue;
-    const q=unproject(s.camera,raw.x,raw.y);
-    if(q && q.x>=-.13 && q.x<=1.13 && q.y>=-.13 && q.y<=1.13){
-      const p=project(s.h,inset+(1-2*inset)*q.x,inset+(1-2*inset)*q.y);
+    const q=cameraToLocal(s,raw);
+    if(q && q.x>=-EDGE_MARGIN && q.x<=1+EDGE_MARGIN && q.y>=-EDGE_MARGIN && q.y<=1+EDGE_MARGIN){
+      const p=project(s.h,clamp(q.x,0,1),clamp(q.y,0,1));
       const distance=Math.abs(q.x-clamp(q.x,0,1))+Math.abs(q.y-clamp(q.y,0,1));
       if(distance<score){score=distance;best={x:clamp(p.x,0,1),y:clamp(p.y,0,1)};}
     }
   }
   return best;
 }
-function updateCameraDwell(event){
-  const result=cameraStep.tracker.update(event,performance.now());
-  const ring=$('dwell-ring');
-  if(ring)ring.style.setProperty('--progress',`${result.progress*100}%`);
-  if(result.phase==='move'){
-    setSetupMessage(`Move your finger to target ${cameraStep.corner+1}, then hold still.`);
-    return;
-  }
-  if(result.phase==='holding'){
-    const remaining=Math.max(0,Math.ceil(3*(1-result.progress)));
-    setSetupMessage(`Target ${cameraStep.corner+1}: hold still · ${remaining} seconds left. No pinch needed.`);
-    return;
-  }
-  if(result.phase!=='complete')return;
-  cameraStep.samples.push(result.sample);cameraStep.corner++;
-  if(cameraStep.corner===4){
-    try {
-      const samples=cameraStep.samples;
-      const signed=samples.reduce((total,p,i)=>total+p[0]*samples[(i+1)%4][1]-p[1]*samples[(i+1)%4][0],0);
-      if(Math.abs(signed)<.01)throw new Error('Points are too close together');
-      surfaces[cameraStep.surface].camera=homography(samples);
-    }catch{
-      cameraStep.samples=[];cameraStep.corner=0;cameraStep.tracker=createDwellTracker();setSetupMessage('Those four camera points are invalid. Try this surface again.');setupPreview();return;
-    }
-    phase='camera-check';
-    setup.querySelector('p:not(.eyebrow)').textContent='Point at the center C without pinching. The small cursor should follow your fingertip and line up with C.';
-    $('finish-setup').hidden=true;$('accept-alignment').hidden=false;$('retry-alignment').hidden=false;
-    setSetupMessage('Use the laptop controls to accept or retry this surface.');status('Check cursor alignment at C');setupPreview();return;
-  }
-  setSetupMessage(`Target ${cameraStep.corner} recorded. Move to target ${cameraStep.corner+1} and hold for 3 seconds.`);
-  status(`Hold at target ${cameraStep.corner+1} for 3 seconds`);setupPreview();
-}
-function retryCameraAlignment(){
-  surfaces[cameraStep.surface].camera=null;
-  cameraStep.corner=0;cameraStep.samples=[];cameraStep.tracker=createDwellTracker();cameraStep.pinching=false;phase='camera';
-  setup.querySelector('p:not(.eyebrow)').textContent='Point your index fingertip at each projected target and hold still for 3 seconds. Do not pinch.';
-  $('finish-setup').hidden=false;$('accept-alignment').hidden=true;$('retry-alignment').hidden=true;
-  cursor.hidden=true;setSetupMessage('Try the four targets again.');status('Hold at target 1 for 3 seconds');setupPreview();
-}
-function acceptCameraAlignment(){
-  cameraStep.surface++;
-  if(cameraStep.surface===surfaces.length){cursor.hidden=true;enterWorkspace();status('Hand alignment complete');return;}
-  cameraStep.corner=0;cameraStep.samples=[];cameraStep.tracker=createDwellTracker();cameraStep.pinching=false;phase='camera';
-  $('surface-number').textContent=String(cameraStep.surface+1);
-  setup.querySelector('p:not(.eyebrow)').textContent='Point your index fingertip at each projected target and hold still for 3 seconds. Do not pinch.';
-  $('finish-setup').hidden=false;$('accept-alignment').hidden=true;$('retry-alignment').hidden=true;
-  cursor.hidden=true;setSetupMessage('Move to target 1 and hold for 3 seconds.');status('Hold at target 1 for 3 seconds');setupPreview();
+// Where a hand off every surface would appear, extending the first calibrated surface's plane.
+function offSurfacePoint(raw){
+  const s=surfaces.find(item=>item.camera),q=s&&cameraToLocal(s,raw);
+  if(!q)return null;
+  const p=project(s.h,q.x,q.y);
+  return Number.isFinite(p.x)&&Number.isFinite(p.y)?{x:clamp(p.x,0,1),y:clamp(p.y,0,1)}:null;
 }
 function pointForEvent(e){
   if(e.source!=='hand')return e;
@@ -183,7 +264,7 @@ function render(){
     const plane=document.createElement('div');plane.className='surface-plane';plane.dataset.surfaceId=s.id;
     plane.style.width=`${width}px`;plane.style.height=`${height}px`;
     plane.style.transform=`matrix3d(${cssMatrix(s.h,width,height).join(',')})`;
-    const badge=document.createElement('span');badge.className='surface-badge';badge.textContent=`SURFACE ${s.number}`;plane.append(badge);
+    const badge=document.createElement('span');badge.className='surface-badge';badge.dataset.surface=String((s.number-1)%4+1);badge.textContent=`SURFACE ${s.number}`;plane.append(badge);
     for(const w of windows.filter(w=>w.surface_id===s.id)){
       const frame=document.createElement('section');frame.className=`surface-window${w.id===activeId?' active':''}`;
       frame.dataset.windowId=w.id;frame.style.zIndex=String(windows.indexOf(w)+1);rectStyle(frame,w);
@@ -322,23 +403,23 @@ function deliverContent(w,e){const s=surfaceById(w.surface_id),p=local(s,e);if(!
 }
 function handleInput(raw,target=null){
   if(raw?.version!==1||typeof raw.type!=='string')return false;
-  if(phase==='camera'){
-    if(raw.source==='hand'&&raw.type==='pointer_move'&&!cameraStep.pinching)updateCameraDwell(raw);
-    if(raw.source==='hand'&&(raw.type==='pointer_down'||raw.type==='pointer_cancel')){
-      cameraStep.pinching=raw.type==='pointer_down';
-      cameraStep.tracker.cancel();const ring=$('dwell-ring');if(ring)ring.style.setProperty('--progress','0%');
-      setSetupMessage(raw.type==='pointer_down'?'Release your pinch, then point and hold still for 3 seconds.':'Hand lost. Point at the target again and hold for 3 seconds.');
+  if(raw.type==='calibration_result'){handleCalibrationResult(raw);return true;}
+  if(phase==='markers'||phase==='marker-failed')return true;
+  if(phase==='finger'||phase==='camera-check'){
+    if(raw.source!=='hand')return true;
+    if(raw.type==='thumbs_down'){retryCameraAlignment();return true;}
+    const hold=phase==='finger'?cameraStep.tracker:cameraStep.checkTracker;
+    if(raw.type==='pointer_cancel'||raw.type==='pointer_down'){
+      if(raw.type==='pointer_cancel')cursor.hidden=true;
+      hold.cancel();const ring=$('dwell-ring');if(ring)ring.style.setProperty('--progress','0%');
+      cameraStep.pinching=raw.type==='pointer_down';return true;
     }
-    if(raw.source==='hand'&&raw.type==='pointer_up')cameraStep.pinching=false;
-    return true;
-  }
-  if(phase==='camera-check'){
-    if(raw.type==='pointer_cancel'){cursor.hidden=true;return true;}
-    if(raw.type==='pointer_move'&&raw.source==='hand'){
-      const s=surfaces[cameraStep.surface],q=unproject(s.camera,raw.x,raw.y);
-      if(q){const p=project(s.h,inset+(1-2*inset)*q.x,inset+(1-2*inset)*q.y);
-        cursor.hidden=false;cursor.style.left=`${p.x*100}%`;cursor.style.top=`${p.y*100}%`;
-      }
+    if(raw.type==='pointer_up'){cameraStep.pinching=false;return true;}
+    if(raw.type==='pointer_move'&&Number.isFinite(raw.x)&&Number.isFinite(raw.y)){
+      const s=surfaces[cameraStep.surface];
+      if(phase==='finger'){if(!cameraStep.pinching)updateFingerDwell(raw);return true;}
+      const q=cameraToLocal(s,raw);
+      if(q){const p=project(s.h,q.x,q.y);showCursor(p,s.number);if(!cameraStep.pinching)updateCheckDwell(p);}
     }
     return true;
   }
@@ -376,9 +457,14 @@ function handleInput(raw,target=null){
   }
   if(!['pointer_move','pointer_down','pointer_up'].includes(raw.type))return false;
   if(!Number.isFinite(raw.x)||!Number.isFinite(raw.y))return false;
-  const e=pointForEvent(raw);if(!e)return false;
+  const e=pointForEvent(raw);
+  if(!e){
+    const off=raw.source==='hand'&&raw.type==='pointer_move'&&offSurfacePoint(raw);
+    if(off)showCursor(off);
+    return false;
+  }
   target??=at(e);
-  if(raw.source==='hand'){cursor.hidden=false;cursor.style.left=`${e.x*100}%`;cursor.style.top=`${e.y*100}%`;}
+  if(raw.source==='hand')showCursor(e,surfaceAt(e)?.number);
   if(e.type==='pointer_down'){
     if(raw.source==='hand'&&target?.closest('button')){interaction={button:target.closest('button')};return true;}
     if(mode==='transfer-ready'){placeTransfer(e);return true;}
@@ -468,7 +554,7 @@ async function capturePhysical(s,bounds,intoId=null){
   if(!navigator.mediaDevices?.getUserMedia){status('Camera access is unavailable on this browser or origin.');return;}
   let stream;
   try{
-    stream=await navigator.mediaDevices.getUserMedia({video:true,audio:false});
+    stream=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:30}},audio:false});
     const video=document.createElement('video');video.muted=true;video.playsInline=true;video.srcObject=stream;
     await video.play();
     surfacesLayer.style.visibility='hidden';actions.style.visibility='hidden';$('stage').classList.add('capture-dark');
@@ -482,7 +568,7 @@ async function capturePhysical(s,bounds,intoId=null){
     const context=crop.getContext('2d'),output=context.createImageData(crop.width,crop.height);
     for(let y=0;y<crop.height;y++)for(let x=0;x<crop.width;x++){
       const u=bounds.x+(x+.5)*bounds.width/crop.width,v=bounds.y+(y+.5)*bounds.height/crop.height;
-      const camera=project(s.camera,(u-inset)/(1-2*inset),(v-inset)/(1-2*inset));
+      const camera=project(s.camera,u,v);
       const sx=Math.round(camera.x*source.width),sy=Math.round(camera.y*source.height);
       if(sx<0||sy<0||sx>=source.width||sy>=source.height)continue;
       const from=(sy*source.width+sx)*4,to=(y*crop.width+x)*4;
@@ -557,6 +643,6 @@ window.SurfaceOS=Object.freeze({
   dispatchInput:event=>handleInput(event),
   mountWidgetRenderer(value){if(!value||typeof value.renderLayout!=='function')throw new TypeError('Expected renderer');renderer=value;render();},
   getState:()=>({phase,mode,surfaces:structuredClone(surfaces),windows:structuredClone(windows)}),
-  reset:()=>{surfaces=[];windows=[];nextId=1;activeId=null;mode='idle';action=null;interaction=null;pendingImage=null;draft=[[.11,.22],[.89,.22],[.89,.83],[.11,.83]];showCalibration();},
+  reset:()=>{if(cameraStep)clearTimeout(cameraStep.timer);cameraStep=null;markerToken++;stage.classList.remove('marker-capture');cursor.hidden=true;surfaces=[];windows=[];nextId=1;activeId=null;mode='idle';action=null;interaction=null;pendingImage=null;draft=[[.11,.22],[.89,.22],[.89,.83],[.11,.83]];showCalibration();},
 });
 showCalibration();

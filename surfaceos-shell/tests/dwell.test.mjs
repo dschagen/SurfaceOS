@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {createDwellTracker} from '../frontend/scripts/dwell.js';
+import {createDwellTracker,DWELL_MS} from '../frontend/scripts/dwell.js';
 
-test('three-second hold records a median point without a pinch',()=>{
+test('four-second hold records a median point without a pinch',()=>{
+  assert.equal(DWELL_MS,4000);
   const tracker=createDwellTracker();let result;
-  for(let i=0;i<=30;i++)result=tracker.update({x:.4+(i%3-1)*.002,y:.5},i*100);
+  for(let i=0;i<40;i++)assert.notEqual(tracker.update({x:.4+(i%3-1)*.002,y:.5},i*100).phase,'complete');
+  result=tracker.update({x:.4,y:.5},4000);
   assert.equal(result.phase,'complete');
   assert.ok(Math.abs(result.sample[0]-.4)<.003);
   assert.equal(result.sample[1],.5);

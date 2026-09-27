@@ -20,11 +20,15 @@ import time
 import urllib.request
 from pathlib import Path
 
+import cv2
+import numpy as np
 from websockets.sync.client import connect
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
+from calibration.coordinate_mapper import CoordinateMapper  # noqa: E402
+from calibration.marker_calibration import COLLECT_S, SETTLE_S, MarkerCalibration, parse_request  # noqa: E402
 from input.events import (POINTER_CANCEL, POINTER_DOWN, POINTER_MOVE,  # noqa: E402
                           POINTER_UP, TWO_HAND_PINCH_START, TWO_HAND_PINCH_MOVE,
                           TWO_HAND_PINCH_END, TWO_HAND_SINGLE_PINCH, Pointer, SurfaceInputEvent)
@@ -152,7 +156,8 @@ class Hand:
 
     def dwell(self, x: float, y: float) -> None:
         self.move(x, y)
-        deadline = time.monotonic() + 3.3
+        # DWELL_MS in surfaceos-shell/frontend/scripts/dwell.js, plus a margin.
+        deadline = time.monotonic() + 4.3
         while time.monotonic() < deadline:
             self.send(POINTER_MOVE, x, y)
 
@@ -166,6 +171,30 @@ class Hand:
         primary = next((hand_id for hand_id, *_, is_primary in hands if is_primary), None)
         self.server.publish(hands_debug_message(pointers, primary))
         time.sleep(0.1)
+
+
+def answer_calibration(browser: Browser, hand: Hand) -> dict:
+    """Plays the tracker's camera: photographs the projected markers with a browser screenshot
+    and solves them with the real marker calibration, so camera coordinates equal page coordinates."""
+    deadline = time.monotonic() + 5
+    request = None
+    while request is None and time.monotonic() < deadline:
+        request = next((parse_request(message) for message in hand.server.poll()), None)
+        time.sleep(0.05)
+    check(request is not None, "shell sends a calibration request with its markers")
+    png = base64.b64decode(browser.send("Page.captureScreenshot", format="png")["data"])
+    frame = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR)
+    calibration = MarkerCalibration(CoordinateMapper(False))
+    calibration.start(request, 0.0)
+    result = calibration.update(frame, SETTLE_S) or calibration.update(frame, SETTLE_S + COLLECT_S)
+    hand.server.publish(result)
+    return result
+
+
+def surface_point(browser: Browser, u: float, v: float) -> tuple[float, float]:
+    h = browser.eval("window.SurfaceOS.getState().surfaces[0].h")
+    d = h[6] * u + h[7] * v + h[8]
+    return (h[0] * u + h[1] * v + h[2]) / d, (h[3] * u + h[4] * v + h[5]) / d
 
 
 def check(condition, message: str) -> None:
@@ -184,11 +213,14 @@ def run(browser: Browser, hand: Hand, base_url: str, hand_url: str) -> None:
     check(browser.eval(f"{state}.surfaces.length") == 1, "first surface has a homography")
     browser.click(*browser.center("#finish-setup"))
     browser.click(*browser.center("#dialog button:first-child"))
-    for x, y in ((.2, .3), (.8, .3), (.8, .75), (.2, .75)):
-        hand.dwell(x, y)
-    check(browser.wait_for(f"{state}.phase === 'camera-check'", label="center check"), "center check follows four steady holds")
-    browser.click(*browser.center("#accept-alignment"))
-    check(browser.wait_for(f"{state}.phase === 'workspace'", label="hand alignment"), "four hand targets align input")
+    check(browser.wait_for("!!document.querySelector('.marker-plane')", label="markers"), "markers are projected on the surface")
+    result = answer_calibration(browser, hand)
+    check(result["ok"] and result["markers_found"] == 12, f"all 12 markers found ({result.get('error_px')} px error)")
+    check(browser.wait_for(f"{state}.phase === 'finger'", label="fingertip step"), "camera mapping is accepted")
+    hand.dwell(*surface_point(browser, .5, .5))
+    check(browser.wait_for(f"{state}.phase === 'camera-check'", label="check step"), "fingertip hold on C records the offset")
+    hand.dwell(*surface_point(browser, .5, .22))
+    check(browser.wait_for(f"{state}.phase === 'workspace'", label="hand alignment"), "hold on OK accepts the surface")
     check(browser.eval(f"{state}.windows.length") == 0, "no windows restored")
 
     print("Mouse: choose action before drawing, then select Calculator")

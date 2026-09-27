@@ -4,9 +4,12 @@ const median = values => {
   return sorted[Math.floor(sorted.length/2)];
 };
 
+// Hold time for every hand-alignment target; setup text reads it from here.
+export const DWELL_MS=4000;
+
 // Records a fingertip only after it has stayed in a small camera-space region.
 // A departure from the previous point is required before the next target can start.
-export function createDwellTracker({durationMs=3000,tolerance=.028,leaveDistance=.07,minSamples=8,maxGapMs=350}={}) {
+export function createDwellTracker({durationMs=DWELL_MS,tolerance=.028,leaveDistance=.07,minSamples=8,maxGapMs=350}={}) {
   let current=null,previous=null,waitingForMove=false;
   return {
     update(point,now) {

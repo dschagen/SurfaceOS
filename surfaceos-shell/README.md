@@ -9,22 +9,29 @@ From this repository, double-click `surfaceos-shell/start_windows.bat`. It serve
 From a terminal at the repository root:
 
 ```bash
-python -m http.server 8000
+python tools/dev_server.py
 ```
+
+This serves the repository root on port 8000 with browser caching turned off, so edited scripts always load. Plain `python -m http.server 8000` also works, but the browser may then keep an old copy of a script after an edit; reload with Ctrl+Shift+R if the page behaves like an older version.
 
 Open `http://localhost:8000/surfaceos-shell/frontend/?hand=off` for a mouse-only run. The default URL tries to connect to the hand tracker at `ws://localhost:8765`; start it separately with `python src/main.py` after installing the dependencies in `requirements.txt`.
 
 ## Mouse walkthrough
 
 1. On every load, drag the four numbered points to the physical boundary of Surface 1. Confirm. Choose **Add another surface** and repeat if a second area fits within the projector beam. Calibrated areas may not overlap in the projector frame.
-2. Choose **Enter workspace**, then **Continue with mouse**. For hand alignment, point your index fingertip at each of four projected targets and hold still for 3 seconds without pinching. The progress ring fills during each hold; move to the next target when the number changes. Moving too far or losing tracking restarts the hold. After four points, point at the center **C** without pinching; use the laptop controls to accept or retry that surface. Repeat for each surface. A plain mouse cannot supply camera-space samples.
+2. Choose **Enter workspace**, then **Continue with mouse**, or **Align hands** when the tracker is running. Hand alignment runs per surface:
+   - **Markers (automatic, about 2 seconds):** the projection goes black with a white grid of square markers on the surface. Keep hands off it. The tracker finds the markers in the camera image and reports a fit error in pixels. If it fails, the setup panel explains why (tracker offline, markers missing, only part of the surface visible, poor fit) and offers **Retry this surface** or **Skip hand alignment**.
+   - **C:** touch the center C with your index fingertip and hold still for 4 seconds. This measures where the tracker places your fingertip relative to the touch point.
+   - **OK:** the colored ring should now sit under your fingertip anywhere on the surface. Hold on OK for 4 seconds to accept, or give a thumbs down to redo the surface. The laptop controls also accept or retry.
+
+   The camera must see the whole surface and the projection clearly. A plain mouse cannot supply camera samples, so mouse testing skips this step.
 3. Choose **New Window**, then drag in a clear area inside one surface. Scroll the program list with the wheel and click **Pinch to confirm** to run the centered app.
 4. Choose **Move / Resize**; confirm, pick an operation, confirm it, then click the target window. Drag the window or one of the four resize corners. With multiple surfaces, Move asks whether to select a numbered destination.
 5. Choose **Close**, confirm, then click the target window. The **Actions** button and the three-action menu let you create another window.
 
-The tracker sends `two_hand_single_pinch` to request the main actions, `two_hand_double_pinch` for Move/Resize, and `thumbs_down` for Close. Gesture prompts ask for Yes/No. `two_hand_pinch_start/move/end` draws a new rectangle after an action is selected. Ordinary pointing, one-hand pinch selection, and scrolling do not ask for approval. Coordinates from the current Python tracker are camera-normalized; the optional four-target alignment maps those points to the projector before dispatching them to the shell.
+The tracker sends `two_hand_single_pinch` to request the main actions, `two_hand_double_pinch` for Move/Resize, and `thumbs_down` for Close. Gesture prompts ask for Yes/No. `two_hand_pinch_start/move/end` draws a new rectangle after an action is selected. Ordinary pointing, one-hand pinch selection, and scrolling do not ask for approval. Coordinates from the current Python tracker are camera-normalized; the marker calibration maps those points to the projector before dispatching them to the shell.
 
-The workspace shows one calibrated pointer. Raw per-hand tracking bubbles are off by default; add `?bubbles=on` to the URL for input debugging (or `&bubbles=on` when another query option is present). Those raw bubbles are camera positions and will not line up with a calibrated surface.
+The workspace shows one calibrated pointer: a small ring following the primary hand, colored by the surface it is over (Surface 1 cyan, 2 amber, 3 pink, 4 lime, gray when off every surface). Each surface label uses the same color. The Python tracker and physical capture request the camera at 1920x1080 and 30 fps; the tracker prints the mode the camera actually delivers. Raw per-hand tracking bubbles are off by default; add `?bubbles=on` to the URL for input debugging (or `&bubbles=on` when another query option is present). Those raw bubbles are camera positions and will not line up with a calibrated surface.
 
 ## Capture and AI paths
 
@@ -40,4 +47,4 @@ The hand server speaks the same event names documented in `docs/input.md`. The s
 
 ## Checks
 
-Run `npm test --prefix surfaceos-shell` from the repository root for perspective and overlap geometry checks. On a laptop with Edge or Chrome and the `websockets` Python package, run `python tools/integration_smoke.py` for a browser walk through calibration, synthetic hand alignment, app selection, and move. Hardware checks must verify the four projected corners, center alignment, real hand targets, camera crop, and optics on the actual surfaces.
+Run `npm test --prefix surfaceos-shell` from the repository root for geometry, dwell, and marker layout checks. On a laptop with Edge or Chrome and the packages in `requirements.txt`, run `python tools/integration_smoke.py` for a browser walk through calibration, marker detection on a screenshot of the projected grid, the fingertip and OK holds, app selection, and move. Hardware checks must verify the four projected corners, marker detection by the real camera, the ring under the fingertip at corners and center, camera crop, and optics on the actual surfaces.

@@ -11,7 +11,7 @@ This document defines the intended user experience. The browser shell now implem
 ## Startup
 
 1. On every launch, show calibration before any windows.
-2. Mark the usable boundary of Surface 1. Calibrate the flat region's projected geometry, then point an index fingertip at each numbered target and hold still for 3 seconds without pinching. Show a filling progress ring; reset it if the hand moves or tracking stops. Require the finger to leave a completed point before holding at the next target. Check the cursor at the projected center and retry that surface if it is off.
+2. Mark the usable boundary of Surface 1. Calibrate the flat region's projected geometry. Then project a marker grid on the surface so the camera can measure it automatically, and explain any failure with Retry and Skip. Next, the user touches the center C and holds still for 4 seconds to correct the fingertip position; a filling progress ring resets if the hand moves or tracking stops. Finally, the calibrated cursor should follow the fingertip: holding on OK for 4 seconds accepts the surface, and a thumbs down retries it.
 3. Ask whether to add another surface. Repeat boundary calibration and number each surface until the user finishes. All demo surfaces use the same projector and are positioned within its illumination and usable focus range.
 4. Enter a nearly blank environment. Show the three main actions: **New Window**, **Screenshot**, **Ask AI**.
 5. Nothing from a previous session, including windows and notes, is automatically restored.
@@ -63,6 +63,6 @@ The shell should remain fully testable without a camera. Clicks can select actio
 ## Implementation boundaries and unresolved technical details
 
 - The shell now implements calibration-first setup, action-before-draw, per-surface perspective transforms, camera-target alignment, and the window management states. Digital screenshot rendering and browser camera capture have implementation paths but still require browser and hardware validation. No AI model endpoint is connected.
-- The shell consumes the existing version 1 two-hand and pointer event names. Hand gesture recognition belongs to input; the shell decides actions and target selection; widgets render inside windows. Camera points are transformed by the shell after the guided four-target alignment, so the tracker must not also warp them.
+- The shell consumes the existing version 1 two-hand and pointer event names. Hand gesture recognition belongs to input; the shell decides actions and target selection; widgets render inside windows. Camera points are transformed by the shell with the per-surface marker calibration and fingertip offset, so the tracker must not also warp them.
 - Precise physical screenshots require mapping camera pixels to each calibrated surface. Projector correction and camera input mapping are related, but they are distinct transformations.
 - A reliable nonoverlap policy should be tested on each surface's logical coordinates, including after moving or resizing. The user-facing result should stay predictable when a proposed placement is invalid.
