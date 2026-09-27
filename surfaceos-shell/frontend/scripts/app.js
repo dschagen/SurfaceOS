@@ -6,10 +6,18 @@ const $ = id => document.getElementById(id);
 const stage=$('stage'), surfacesLayer=$('surfaces'), setup=$('setup'), calibration=$('calibration');
 const setupDragHandle=$('setup-drag-handle');
 const dialog=$('dialog'), actions=$('actions'), outline=$('outline'), cursor=$('cursor'), labels=$('surface-labels');
+const editControls=$('edit-controls');
 let surfaces=[], draft=[[.11,.22],[.89,.22],[.89,.83],[.11,.83]], windows=[], nextId=1;
 let phase='calibration', mode='idle', action=null, interaction=null, operation=null, selectedId=null;
 let activeId=null, renderer=null, sourceId=null, destinationId=null, cameraStep=null, pendingImage=null;
 let setupDrag=null;
+// Move and resize remember the window's starting bounds so Cancel can restore them.
+let editBase=null;
+const EDIT_MODES=['move-ready','moving','resize-ready','resizing','resizing-hands'];
+// Finger travel, in stage heights, that steps the program picker one entry; window content
+// scrolls at SCROLL_GAIN times the finger's movement.
+const PICKER_STEP=.08,SCROLL_GAIN=.5;
+let pickerScroll={id:null,travel:0};
 // Surface numbers are never reused after a close. Hand alignment covers surfaces from alignStart on.
 let nextSurface=1, alignStart=0;
 const HOLD_S=DWELL_MS/1000;
@@ -332,6 +340,7 @@ function render(){
   for(const plane of oldPlanes.values())plane.remove();
   renderer?.sync?.(windows.map(({id,content})=>({id,content})));
   if(mode!=='surface-pick')labels.hidden=true;
+  editControls.hidden=!EDIT_MODES.includes(mode);
 }
 function renderContent(w,host){
   if(w.content==='picker'){
@@ -440,9 +449,35 @@ function chooseTarget(id){
   activeId=id;selectedId=id;
   if(operation==='capture-source'){sourceId=id;mode='idle';arm('capture-window');status('Draw a free destination window for the screenshot');return;}
   if(operation==='close'){windows=windows.filter(item=>item.id!==id);activeId=windows.at(-1)?.id||null;cancel();render();status('Window closed');return;}
-  if(operation==='resize'){mode='resize-ready';render();status('Drag any corner handle to resize. Escape cancels.');return;}
-  if(operation==='move'){mode='move-ready';render();status('Drag the selected window to a free position');return;}
+  if(operation==='resize'||operation==='move')editBase={id,bounds:{x:w.x,y:w.y,width:w.width,height:w.height}};
+  if(operation==='resize'){mode='resize-ready';render();status('Pinch with both hands and spread them to set the new size (or drag a corner with the mouse). Done or Cancel when finished.');return;}
+  if(operation==='move'){mode='move-ready';render();status('Pinch and drag the window to a free position. Done or Cancel when finished.');return;}
   if(operation==='transfer')showDestinationLabels();
+}
+// Done keeps the window where it is now; Cancel puts it back where it was when Move or Resize began.
+function finishEdit(keep){
+  const w=editBase&&windowById(editBase.id);
+  if(!keep&&w)Object.assign(w,editBase.bounds);
+  editBase=null;interaction=null;mode='idle';selectedId=null;outline.hidden=true;render();
+  status(keep?'Window updated':'Change canceled');
+}
+// While Resize is active, the rectangle between two pinching hands becomes the window's new bounds
+// on its own surface. Releasing both pinches keeps the last valid size and ends the resize.
+function resizeWithHands(raw){
+  const w=windowById(selectedId);if(!w)return false;
+  if(raw.type==='two_hand_pinch_start'){mode='resizing-hands';interaction={id:w.id,base:{x:w.x,y:w.y,width:w.width,height:w.height}};}
+  if(mode!=='resizing-hands')return false;
+  const r=Number.isFinite(raw.width)&&Number.isFinite(raw.height)?rectForGesture(raw):null;
+  const s=surfaceById(w.surface_id);
+  const corners=r?[{x:r.x,y:r.y},{x:r.x+r.width,y:r.y},{x:r.x+r.width,y:r.y+r.height},{x:r.x,y:r.y+r.height}].map(p=>local(s,p)):[];
+  if(r&&corners.every(Boolean)){
+    const xs=corners.map(p=>clamp(p.x,0,1)),ys=corners.map(p=>clamp(p.y,0,1));
+    const proposed={x:Math.min(...xs),y:Math.min(...ys),width:Math.max(...xs)-Math.min(...xs),height:Math.max(...ys)-Math.min(...ys)};
+    if(validRect(proposed,otherWindows(s.id),w.id)){Object.assign(w,proposed);render();status('Release both pinches to keep this size');}
+    else status('That size overlaps another window or is too small');
+  }
+  if(raw.type==='two_hand_pinch_end')finishEdit(true);
+  return true;
 }
 function showDestinationLabels(){mode='surface-pick';labels.hidden=false;labels.replaceChildren();
   for(const s of surfaces){if(s.id===windowById(selectedId)?.surface_id)continue;
@@ -463,6 +498,23 @@ function deliverContent(w,e){const s=surfaceById(w.surface_id),p=local(s,e);if(!
   const yTop=w.y+42/stage.clientHeight;
   const host=document.querySelector(`[data-window-id="${w.id}"] .widget-host`);if(!host)return;
   host.dispatchEvent(new CustomEvent('surfaceos:window-pointer',{bubbles:true,detail:{version:1,type:e.type,source:e.source,window_id:w.id,x:(p.x-w.x)/w.width,y:(p.y-yTop)/(w.height-42/stage.clientHeight),dy:e.dy}}));
+}
+// Shell buttons (not widget-renderer buttons, which take pointer events themselves), target picking,
+// and the program picker are clicks. Everything else a hand presses on starts a drag.
+function handClickOnly(target){
+  const shellButton=target?.closest('button');
+  if(shellButton&&!shellButton.closest('.surfaceos-widgets'))return true;
+  if(['transfer-ready','target','surface-target'].includes(mode))return true;
+  return windowById(target?.closest('.surface-window')?.dataset.windowId)?.content==='picker';
+}
+function handClick(e,target){
+  const shellButton=target?.closest('button');
+  if(shellButton&&!shellButton.closest('.surfaceos-widgets')){shellButton.click();return;}
+  if(mode==='transfer-ready'){placeTransfer(e);return;}
+  if(mode==='target'){const id=target?.closest('.surface-window')?.dataset.windowId;if(id)chooseTarget(id);return;}
+  if(mode==='surface-target'){if(target?.closest('footer,.panel'))return;const s=surfaceAt(e);if(s)chooseSurfaceToClose(s);return;}
+  const w=windowById(target?.closest('.surface-window')?.dataset.windowId);
+  if(w?.content==='picker'){activeId=w.id;selectProgram(w.id);}
 }
 function handleInput(raw,target=null){
   if(raw?.version!==1||typeof raw.type!=='string')return false;
@@ -489,29 +541,41 @@ function handleInput(raw,target=null){
   }
   if(phase!=='workspace')return false;
   if(raw.type==='pointer_cancel'||raw.type==='two_hand_pinch_cancel'){
+    if(interaction?.click)interaction=null;
     if(mode==='content'&&interaction){const w=windowById(interaction.id);if(w)deliverContent(w,{...interaction.last,type:'pointer_cancel'});}
+    if(mode==='resizing-hands'){const w=windowById(interaction?.id);if(w)Object.assign(w,interaction.base);mode='resize-ready';interaction=null;render();}
     if(mode==='drawing'||mode==='moving'||mode==='resizing'){mode=mode==='drawing'?'armed':interaction?.returnMode||'idle';interaction=null;outline.hidden=true;render();}
-    cursor.hidden=true;return true;
+    if(raw.type==='pointer_cancel')cursor.hidden=true;
+    return true;
   }
   // A gesture menu never interrupts drawing, moving, or resizing.
-  const busy=['armed','drawing','moving','resizing'].includes(mode);
+  const busy=['armed','drawing',...EDIT_MODES].includes(mode);
   if(raw.type==='two_hand_hold'){if(busy)return false;askMainMenu();return true;}
   if(raw.type==='peace_sign'){if(busy)return false;askManage();return true;}
   if(raw.type==='thumbs_down'){if(busy)return false;askClose();return true;}
   if(raw.type==='scroll'){
     const point=pointForEvent(raw);if(!point)return false;
     const frame=at(point)?.closest('.surface-window'),w=windowById(frame?.dataset.windowId);
-    if(w?.content==='picker'){cyclePicker(w.id,(raw.dy||0)>0?1:-1);return true;}
+    if(w?.content==='picker'){
+      if(pickerScroll.id!==w.id)pickerScroll={id:w.id,travel:0};
+      pickerScroll.travel+=raw.dy||0;
+      while(Math.abs(pickerScroll.travel)>=PICKER_STEP){
+        const direction=Math.sign(pickerScroll.travel);cyclePicker(w.id,direction);pickerScroll.travel-=direction*PICKER_STEP;
+      }
+      return true;
+    }
     if(w){
+      const dy=(raw.dy||0)*SCROLL_GAIN;
       const host=frame.querySelector('.widget-host');let node=at(point);
       while(node&&node!==host){
-        if(node.scrollHeight>node.clientHeight+2){node.scrollTop+=(raw.dy||0)*stage.clientHeight;break;}
+        if(node.scrollHeight>node.clientHeight+2){node.scrollTop+=dy*stage.clientHeight;break;}
         node=node.parentElement;
       }
-      deliverContent(w,{...point,type:'scroll',dy:raw.dy});
+      deliverContent(w,{...point,type:'scroll',dy});
     }
     return !!w;
   }
+  if(raw.type.startsWith('two_hand_pinch_')&&(mode==='resize-ready'||mode==='resizing-hands'))return resizeWithHands(raw);
   if(raw.type.startsWith('two_hand_pinch_')){
     if(mode!=='armed'&&mode!=='drawing')return false;
     if(!Number.isFinite(raw.width)||!Number.isFinite(raw.height))return false;
@@ -532,9 +596,8 @@ function handleInput(raw,target=null){
   target??=at(e);
   if(raw.source==='hand')showCursor(e,surfaceAt(e)?.number);
   if(e.type==='pointer_down'){
-    // Widget-renderer buttons act on pointer events, not native clicks, so hand presses on them go to the window content below.
-    const shellButton=target?.closest('button');
-    if(raw.source==='hand'&&shellButton&&!shellButton.closest('.surfaceos-widgets')){interaction={button:shellButton};return true;}
+    // A hand click happens on release, where the ring is then; only drags start on the press.
+    if(raw.source==='hand'&&handClickOnly(target)){interaction={click:true};return true;}
     if(mode==='transfer-ready'){placeTransfer(e);return true;}
     if(mode==='target'){
       const id=target?.closest('.surface-window')?.dataset.windowId;if(id){chooseTarget(id);return true;}return false;
@@ -554,7 +617,7 @@ function handleInput(raw,target=null){
       const corner=target.closest('[data-resize]').dataset.resize,w=windowById(selectedId),s=surfaceById(w.surface_id);mode='resizing';interaction={id:w.id,start:local(s,e),corner,base:{x:w.x,y:w.y,width:w.width,height:w.height},lastValid:{x:w.x,y:w.y,width:w.width,height:w.height},returnMode:'resize-ready'};return true;
     }
     const frame=target?.closest('.surface-window'),w=windowById(frame?.dataset.windowId);
-    if(w?.content==='picker'){activeId=w.id;if(raw.source==='hand'){selectProgram(w.id);return true;}return false;}
+    if(w?.content==='picker'){activeId=w.id;return false;}
     if(w){activeId=w.id;if(raw.source==='hand'){mode='content';interaction={id:w.id,last:e};deliverContent(w,e);}return false;}
     return false;
   }
@@ -573,11 +636,9 @@ function handleInput(raw,target=null){
     return false;
   }
   if(e.type==='pointer_up'){
-    if(interaction?.button&&raw.source==='hand'){
-      const button=interaction.button;interaction=null;if(button===target?.closest('button'))button.click();return true;
-    }
+    if(interaction?.click&&raw.source==='hand'){interaction=null;handClick(e,target);return true;}
     if(mode==='drawing'&&interaction?.start){const r=rectBetween(interaction.start,e);interaction=null;completeDrawing(r);return true;}
-    if((mode==='moving'||mode==='resizing')&&interaction){interaction=null;mode='idle';selectedId=null;render();status('Window updated');return true;}
+    if((mode==='moving'||mode==='resizing')&&interaction){finishEdit(true);return true;}
     if(mode==='content'&&interaction?.id&&raw.source==='hand'){const w=windowById(interaction.id);if(w)deliverContent(w,e);mode='idle';interaction=null;return true;}
   }
   return false;
@@ -676,6 +737,8 @@ actions.addEventListener('click',e=>{const button=e.target.closest('[data-action
 $('actions-button').addEventListener('click',askMainMenu);
 $('manage-button').addEventListener('click',askManage);
 $('close-button').addEventListener('click',askClose);
+$('edit-done').addEventListener('click',()=>finishEdit(true));
+$('edit-cancel').addEventListener('click',()=>finishEdit(false));
 $('fullscreen').addEventListener('click',()=>document.fullscreenElement?document.exitFullscreen():stage.requestFullscreen?.());
 setupDragHandle.addEventListener('pointerdown',e=>{
   if(e.pointerType==='mouse'&&e.button!==0)return;
@@ -725,7 +788,7 @@ stage.addEventListener('pointerup',e=>{
 });
 stage.addEventListener('pointercancel',e=>handleInput({version:1,type:'pointer_cancel',source:'mouse'}));
 document.addEventListener('keydown',e=>{
-  if(e.key==='Escape'){cancel();return;}
+  if(e.key==='Escape'){if(EDIT_MODES.includes(mode))finishEdit(false);else cancel();return;}
   if(e.target.matches('textarea,input,[contenteditable]')||e.ctrlKey||e.metaKey||e.altKey)return;
   if(e.key.toLowerCase()==='f')$('fullscreen').click();
   if(phase==='workspace'&&e.key.toLowerCase()==='n')chooseAction('new');
