@@ -4,7 +4,7 @@ from helpers import make_hand
 from calibration.coordinate_mapper import CoordinateMapper
 from gestures.gesture_detector import GestureDetector
 from input.events import (HOLD_PROGRESS, PEACE_SIGN, POINTER_CANCEL, POINTER_DOWN, POINTER_MOVE,
-                          POINTER_UP, SCROLL, THUMBS_DOWN, TWO_HAND_HOLD, TWO_HAND_PINCH_END,
+                          POINTER_UP, SCROLL, THUMBS_DOWN, THUMBS_UP, TWO_HAND_HOLD, TWO_HAND_PINCH_END,
                           TWO_HAND_PINCH_START)
 from input.interaction_state import InteractionState
 from test_gestures import OPEN, PINCHED, SETTINGS
@@ -135,6 +135,15 @@ class InteractionTests(unittest.TestCase):
             _, events = self.step([make_hand(gesture="Thumb_Down", score=0.9)])
             found += types(events)
         self.assertEqual(found.count(THUMBS_DOWN), 1)
+
+    def test_thumbs_up_event_carries_the_hand_position(self):
+        found = []
+        for _ in range(12):
+            _, events = self.step([make_hand(gesture="Thumb_Up", score=0.9, tip=(0.3, 0.4))])
+            found += [event for event in events if event.type == THUMBS_UP]
+        self.assertEqual(len(found), 1)
+        self.assertIsNotNone(found[0].x)
+        self.assertIsNotNone(found[0].y)
 
     def test_peace_sign_event(self):
         found = []

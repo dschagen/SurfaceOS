@@ -1,15 +1,26 @@
+import base64
 import unittest
 
+import cv2
 import numpy as np
 
 import helpers  # noqa: F401
 from ai import contract
 from ai.gemini_service import AIResult, AIServiceError
-from ai.router import AIRouter
-from vision.object_watch import WatchEvent
+from ai.router import AIRouter, PREVIEW_MAX_SIDE, SNAPSHOT_DELAY_S
 
-BOX = (0.4, 0.4, 0.2, 0.2)
-FRAME = np.full((240, 320, 3), 120, dtype=np.uint8)
+
+def desk_frame(width=1920, height=1080):
+    """A grey desk with a bright square in the middle, so crops can be checked."""
+    frame = np.full((height, width, 3), 90, dtype=np.uint8)
+    frame[height // 4:3 * height // 4, width // 4:3 * width // 4] = 250
+    return frame
+
+
+def decode_data_url(url):
+    prefix = "data:image/jpeg;base64,"
+    assert url.startswith(prefix), url[:40]
+    return cv2.imdecode(np.frombuffer(base64.b64decode(url[len(prefix):]), np.uint8), cv2.IMREAD_COLOR)
 
 
 class SyncExecutor:
@@ -41,189 +52,163 @@ class FakeGemini:
     def configuration_problem(self):
         return None
 
-    def identify(self, image, mime_type="image/jpeg"):
-        self.calls.append(("identify", image[:2]))
+    def describe(self, image, mime_type="image/jpeg", style="text"):
+        self.calls.append(("describe", image, style))
         if self.fail_with:
             raise self.fail_with
-        return AIResult(text="coffee mug", model="fake", identification={
-            "label": "coffee mug", "confidence": "high", "uncertain": False, "object_present": True, "summary": ""})
+        return AIResult(text="A white square on a grey desk.", model="fake", provider="test-double")
 
-    def ask(self, prompt, image=None, mime_type="image/jpeg", context=None, subject=None, grounding=False):
-        self.calls.append(("ask", prompt, image is not None, subject, grounding, len(context or [])))
-        return AIResult(text="An answer.", model="fake", sources=[{"title": "S", "url": "https://s.example"}], grounded=grounding)
-
-
-class ScriptedWatcher:
-    def __init__(self):
-        self.pending = []
-        self.updates = 0
-        self.resets = 0
-
-    def update(self, frame, now, hands=None):
-        self.updates += 1
-        events, self.pending = self.pending, []
-        return events
-
-    def camera_box_for_capture(self, frame):
-        return BOX
-
-    def reset(self):
-        self.resets += 1
+    def ask(self, prompt, image=None, mime_type="image/jpeg", context=None, subject=None, grounding=False, style="text"):
+        self.calls.append(("ask", prompt, image, grounding, style, len(context or [])))
+        if self.fail_with:
+            raise self.fail_with
+        return AIResult(text="An answer.", model="fake", sources=[{"title": "S", "url": "https://s.example"}],
+                        grounded=grounding, provider="test-double")
 
 
 class RouterTests(unittest.TestCase):
     def setUp(self):
         self.sent = []
         self.gemini = FakeGemini()
-        self.watcher = ScriptedWatcher()
         self.now = 100.0
         self.router = AIRouter(self.gemini, lambda client, message: self.sent.append((client, message)),
-                               self.watcher, executor=SyncExecutor(), clock=lambda: self.now)
+                               executor=SyncExecutor(), clock=lambda: self.now)
 
     def to(self, client, kind=None):
         return [m for c, m in self.sent if c == client and (kind is None or m["type"] == kind)]
 
     def send(self, client, kind, **fields):
-        self.router.handle(client, {"version": 1, "type": kind, **fields})
+        return self.router.handle(client, {"version": 1, "type": kind, **fields})
 
-    def frame(self, *events):
-        self.watcher.pending = list(events)
-        self.router.on_frame(FRAME, [], self.now)
+    def frame(self, image=None, dt=1 / 30):
+        self.now += dt
+        self.router.on_frame(desk_frame() if image is None else image, self.now)
 
-    def watch(self, client="A", window="window-1"):
-        self.send(client, contract.EXPLORE_WATCH, window_id=window)
+    def snapshot(self, client="A", window="window-1", request="snap-1"):
+        self.frame()
+        self.send(client, contract.AI_SNAPSHOT, window_id=window, request_id=request)
+        for _ in range(12):
+            self.frame()
+        return self.to(client, contract.AI_CAPTURE)[-1]
 
     # ---- routing ----
 
-    def test_response_goes_only_to_the_requesting_window(self):
-        self.send("A", contract.AI_REQUEST, window_id="window-1", request_id="q1", task="ask", prompt="Hi?")
-        self.send("B", contract.AI_REQUEST, window_id="window-2", request_id="q2", task="ask", prompt="Yo?")
+    def test_answers_go_only_to_the_asking_window(self):
+        self.assertTrue(self.send("A", contract.AI_REQUEST, window_id="window-1", request_id="q1", task="ask", prompt="Hi?"))
+        self.send("B", contract.AI_REQUEST, window_id="window-2", request_id="q2", task="ask", prompt="Yo?", style="spoken")
         [a], [b] = self.to("A"), self.to("B")
-        self.assertEqual((a["window_id"], a["request_id"], a["ok"], a["text"]), ("window-1", "q1", True, "An answer."))
+        self.assertEqual((a["window_id"], a["request_id"], a["ok"], a["text"], a["provider"]),
+                         ("window-1", "q1", True, "An answer.", "test-double"))
         self.assertEqual((b["window_id"], b["request_id"]), ("window-2", "q2"))
-        self.assertEqual(a["provider"], "gemini")
+        self.assertEqual(self.gemini.calls[-1][4], "spoken", "the answer style reaches Gemini")
 
-    def test_invalid_request_is_answered_with_its_ids(self):
+    def test_other_messages_are_left_for_the_main_loop(self):
+        calibration = {"version": 1, "type": "calibration_request", "surface_id": "surface-1", "markers": []}
+        self.assertFalse(self.router.handle("A", calibration))
+        self.assertFalse(self.router.handle("A", {"type": contract.AI_REQUEST}))
+        self.assertFalse(self.router.handle("A", "not a dict"))
+        self.assertEqual(self.sent, [])
+
+    def test_invalid_requests_are_answered_with_their_ids(self):
         self.send("A", contract.AI_REQUEST, window_id="window-1", request_id="q1", task="ask", prompt="")
-        [reply] = self.to("A")
-        self.assertEqual((reply["ok"], reply["request_id"], reply["error"]["code"]), (False, "q1", contract.ERR_INVALID))
+        self.send("A", contract.AI_CROP, window_id="window-1", request_id="c1", capture_id="capture-1", box={"x": 0.5})
+        ask_error, crop_error = self.to("A")
+        self.assertEqual((ask_error["type"], ask_error["ok"], ask_error["request_id"], ask_error["error"]["code"]),
+                         (contract.AI_RESPONSE, False, "q1", contract.ERR_INVALID))
+        self.assertEqual((crop_error["type"], crop_error["ok"], crop_error["request_id"]), (contract.AI_CAPTURE, False, "c1"))
         self.assertEqual(self.gemini.calls, [])
 
     def test_service_errors_are_returned_not_raised(self):
         self.gemini.fail_with = AIServiceError(contract.ERR_TIMEOUT, "slow")
-        self.send("A", contract.AI_REQUEST, window_id="w", request_id="q", task="identify", image={"data": "aGk="})
+        self.send("A", contract.AI_REQUEST, window_id="w", request_id="q", task="describe", image={"data": "aGk="})
         [reply] = self.to("A")
         self.assertEqual(reply["error"], {"code": contract.ERR_TIMEOUT, "message": "slow"})
 
-    def test_unknown_capture_is_reported(self):
+    def test_unknown_photos_are_reported(self):
         self.send("A", contract.AI_REQUEST, window_id="w", request_id="q", task="ask", prompt="?", capture_id="capture-99")
-        self.assertEqual(self.to("A")[0]["error"]["code"], contract.ERR_NOT_FOUND)
+        self.send("A", contract.AI_CROP, window_id="w", request_id="c", capture_id="capture-99",
+                  box={"x": 0, "y": 0, "width": 0.5, "height": 0.5})
+        self.assertEqual([m["error"]["code"] for m in self.to("A")], [contract.ERR_NOT_FOUND, contract.ERR_NOT_FOUND])
 
     def test_too_many_running_requests_is_busy(self):
         held = HeldExecutor()
-        router = AIRouter(self.gemini, lambda c, m: self.sent.append((c, m)), self.watcher, executor=held, max_pending=2)
+        router = AIRouter(self.gemini, lambda c, m: self.sent.append((c, m)), executor=held, max_pending=2)
         for i in range(3):
-            router.handle("A", {"version": 1, "type": contract.AI_REQUEST, "window_id": "w", "request_id": f"q{i}", "task": "ask", "prompt": "?"})
+            router.handle("A", {"version": 1, "type": contract.AI_REQUEST, "window_id": "w", "request_id": f"q{i}",
+                                "task": "ask", "prompt": "?"})
         self.assertEqual([m["request_id"] for c, m in self.sent], ["q2"])
         self.assertEqual(self.sent[0][1]["error"]["code"], contract.ERR_BUSY)
         held.release()
         self.assertEqual(sorted(m["request_id"] for c, m in self.sent if m["ok"]), ["q0", "q1"])
 
-    # ---- Explore Object consent flow ----
+    # ---- snapshots ----
 
-    def test_trigger_captures_and_identifies_without_web_lookup(self):
-        self.watch()
-        self.assertEqual(self.to("A", contract.EXPLORE_STATUS)[-1]["state"], contract.STATE_WATCHING)
-        self.frame(WatchEvent("triggered", BOX))
-        [capture] = self.to("A", contract.EXPLORE_CAPTURE)
-        self.assertTrue(capture["image"].startswith("data:image/jpeg;base64,"))
-        self.assertEqual(capture["trigger"], "auto")
-        [identified] = self.to("A", contract.AI_RESPONSE)
-        self.assertEqual((identified["request_id"], identified["task"]), (capture["request_id"], "identify"))
-        self.assertEqual(identified["identification"]["capture_id"], capture["capture_id"])
-        self.assertEqual([c[0] for c in self.gemini.calls], ["identify"], "no lookup before the user says yes")
+    def test_snapshot_waits_for_a_fresh_frame_after_the_request(self):
+        self.frame()
+        self.send("A", contract.AI_SNAPSHOT, window_id="window-1", request_id="snap-1")
+        self.frame(dt=SNAPSHOT_DELAY_S / 2)
+        self.assertEqual(self.to("A"), [], "the projection may still be visible in buffered frames")
+        self.frame(dt=SNAPSHOT_DELAY_S)
+        [reply] = self.to("A", contract.AI_CAPTURE)
+        self.assertEqual((reply["ok"], reply["request_id"], reply["window_id"]), (True, "snap-1", "window-1"))
+        self.assertEqual((reply["width"], reply["height"]), (1920, 1080), "the whole camera frame")
+        preview = decode_data_url(reply["image"])
+        self.assertEqual(max(preview.shape[:2]), PREVIEW_MAX_SIDE, "the browser gets a smaller preview")
+        stored = self.router.captures.get(reply["capture_id"])
+        self.assertEqual((stored.width, stored.height), (1920, 1080))
+        self.frame()
+        self.assertEqual(len(self.to("A", contract.AI_CAPTURE)), 1, "one photo per request")
 
-    def test_yes_asks_with_the_captured_image_and_grounding(self):
-        self.watch()
-        self.frame(WatchEvent("triggered", BOX))
-        capture_id = self.to("A", contract.EXPLORE_CAPTURE)[0]["capture_id"]
-        self.send("A", contract.AI_REQUEST, window_id="window-1", request_id="more", task="ask", prompt="Tell me more",
-                  capture_id=capture_id, subject="coffee mug", grounding=True)
-        self.assertEqual(self.gemini.calls[-1], ("ask", "Tell me more", True, "coffee mug", True, 0))
-        reply = self.to("A", contract.AI_RESPONSE)[-1]
-        self.assertEqual((reply["request_id"], reply["sources"][0]["url"]), ("more", "https://s.example"))
-
-    def test_no_new_capture_while_a_result_is_shown(self):
-        self.watch()
-        self.frame(WatchEvent("triggered", BOX))
-        self.frame(WatchEvent("triggered", BOX))
-        self.assertEqual(len(self.to("A", contract.EXPLORE_CAPTURE)), 1)
-
-    def test_no_returns_to_watching_for_a_new_object(self):
-        self.watch()
-        self.frame(WatchEvent("triggered", BOX))
-        self.send("A", contract.EXPLORE_DISMISS, window_id="window-1")
-        self.assertEqual(self.to("A", contract.EXPLORE_STATUS)[-1]["state"], contract.STATE_WATCHING)
-        self.frame(WatchEvent("triggered", BOX))
-        self.assertEqual(len(self.to("A", contract.EXPLORE_CAPTURE)), 2)
-
-    def test_object_leaving_is_reported_for_the_shown_capture(self):
-        self.watch()
-        self.frame(WatchEvent("triggered", BOX))
-        capture_id = self.to("A", contract.EXPLORE_CAPTURE)[0]["capture_id"]
-        self.frame(WatchEvent("left", BOX))
-        [left] = self.to("A", contract.EXPLORE_OBJECT_LEFT)
-        self.assertEqual((left["window_id"], left["capture_id"]), ("window-1", capture_id))
-
-    def test_pause_stops_detection_and_resume_relearns(self):
-        self.watch()
-        self.send("A", contract.EXPLORE_PAUSE, window_id="window-1")
-        self.frame(WatchEvent("triggered", BOX))
-        self.assertEqual((self.watcher.updates, self.to("A", contract.EXPLORE_CAPTURE)), (0, []))
-        self.send("A", contract.EXPLORE_RESUME, window_id="window-1")
-        self.assertEqual(self.watcher.resets, 1)
-        self.frame(WatchEvent("triggered", BOX))
-        self.assertEqual(len(self.to("A", contract.EXPLORE_CAPTURE)), 1)
-
-    def test_manual_analyze_captures_the_next_frame(self):
-        self.watch()
-        self.router.on_frame(FRAME, [], self.now)
-        self.send("A", contract.EXPLORE_ANALYZE_FRAME, window_id="window-1", request_id="manual-1")
-        self.router.on_frame(FRAME, [], self.now)
-        [capture] = self.to("A", contract.EXPLORE_CAPTURE)
-        self.assertEqual((capture["request_id"], capture["trigger"]), ("manual-1", "manual"))
-        self.assertEqual(self.to("A", contract.AI_RESPONSE)[0]["request_id"], "manual-1")
-
-    def test_manual_analyze_without_camera_frames_fails_fast(self):
-        self.watch()
-        self.send("A", contract.EXPLORE_ANALYZE_FRAME, window_id="window-1", request_id="m")
-        self.assertEqual(self.to("A", contract.AI_RESPONSE)[0]["error"]["code"], contract.ERR_NO_FRAME)
-        self.router.on_frame(FRAME, [], self.now)
+    def test_snapshot_without_camera_frames_fails_fast(self):
+        self.send("A", contract.AI_SNAPSHOT, window_id="window-1", request_id="snap-1")
+        self.frame()
         self.now += 5
-        self.send("A", contract.EXPLORE_ANALYZE_FRAME, window_id="window-1", request_id="m2")
-        self.assertEqual(self.to("A", contract.AI_RESPONSE)[-1]["error"]["code"], contract.ERR_NO_FRAME, "stale frames")
+        self.send("A", contract.AI_SNAPSHOT, window_id="window-1", request_id="snap-2")
+        replies = self.to("A", contract.AI_CAPTURE)
+        self.assertEqual([(m["request_id"], m["ok"], m["error"]["code"]) for m in replies],
+                         [("snap-1", False, contract.ERR_NO_FRAME), ("snap-2", False, contract.ERR_NO_FRAME)])
 
-    def test_second_window_takes_over_and_first_is_told(self):
-        self.watch("A", "window-1")
-        self.watch("B", "window-2")
-        self.assertEqual(self.to("A", contract.EXPLORE_STATUS)[-1]["state"], contract.STATE_INACTIVE)
-        self.frame(WatchEvent("triggered", BOX))
-        self.assertEqual((len(self.to("A", contract.EXPLORE_CAPTURE)), len(self.to("B", contract.EXPLORE_CAPTURE))), (0, 1))
-        self.send("A", contract.EXPLORE_PAUSE, window_id="window-1")
-        self.assertEqual(self.to("A", contract.EXPLORE_STATUS)[-1]["state"], contract.STATE_INACTIVE)
-
-    def test_no_detection_work_without_an_open_window(self):
-        self.frame(WatchEvent("triggered", BOX))
-        self.assertEqual(self.watcher.updates, 0)
-        self.watch()
+    def test_snapshot_for_a_closed_browser_is_dropped(self):
+        self.frame()
+        self.send("A", contract.AI_SNAPSHOT, window_id="window-1", request_id="snap-1")
         self.router.client_closed("A")
-        self.frame(WatchEvent("triggered", BOX))
-        self.assertEqual((self.watcher.updates, self.to("A", contract.EXPLORE_CAPTURE)), (0, []))
+        for _ in range(12):
+            self.frame()
+        self.assertEqual(self.to("A"), [])
 
-    def test_messages_of_other_types_are_ignored(self):
-        self.send("A", "pointer_move", x=0.5, y=0.5)
-        self.router.handle("A", {"type": contract.AI_REQUEST})
+    def test_no_work_happens_on_frames_without_a_request(self):
+        for _ in range(30):
+            self.frame()
         self.assertEqual(self.sent, [])
+
+    # ---- crop, describe, and questions about a photo ----
+
+    def test_crop_makes_a_new_photo_of_the_selected_area(self):
+        photo = self.snapshot()
+        self.send("A", contract.AI_CROP, window_id="window-1", request_id="crop-1", capture_id=photo["capture_id"],
+                  box={"x": 0.25, "y": 0.25, "width": 0.5, "height": 0.5})
+        crop = self.to("A", contract.AI_CAPTURE)[-1]
+        self.assertEqual((crop["ok"], crop["request_id"]), (True, "crop-1"))
+        self.assertNotEqual(crop["capture_id"], photo["capture_id"])
+        self.assertEqual((crop["width"], crop["height"]), (960, 540), "cropped from the full-resolution frame")
+        pixels = decode_data_url(crop["image"])
+        self.assertGreater(pixels.mean(), 230, "only the bright square was kept")
+
+    def test_describe_and_questions_use_the_stored_photo(self):
+        photo = self.snapshot()
+        self.send("A", contract.AI_CROP, window_id="window-1", request_id="crop-1", capture_id=photo["capture_id"],
+                  box={"x": 0.25, "y": 0.25, "width": 0.5, "height": 0.5})
+        crop_id = self.to("A", contract.AI_CAPTURE)[-1]["capture_id"]
+        self.send("A", contract.AI_REQUEST, window_id="window-1", request_id="d1", task="describe", capture_id=crop_id, style="spoken")
+        self.send("A", contract.AI_REQUEST, window_id="window-1", request_id="q1", task="ask", prompt="What colour?",
+                  capture_id=crop_id, grounding=True, style="spoken", context=[{"role": "model", "text": "A square."}])
+        describe_call, ask_call = self.gemini.calls
+        stored = self.router.captures.get(crop_id).image
+        self.assertEqual((describe_call[0], describe_call[1], describe_call[2]), ("describe", stored, "spoken"))
+        self.assertEqual(ask_call, ("ask", "What colour?", stored, True, "spoken", 1))
+        described, answered = self.to("A", contract.AI_RESPONSE)
+        self.assertEqual((described["task"], described["text"]), ("describe", "A white square on a grey desk."))
+        self.assertEqual((answered["request_id"], answered["sources"][0]["url"]), ("q1", "https://s.example"))
 
 
 if __name__ == "__main__":

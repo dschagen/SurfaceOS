@@ -17,6 +17,7 @@
 
 <script type="module">
   import { mountApp, APPS } from "./apps/app-host.js";
+  import { createVoice } from "./apps/voice.js";
   import { evaluate, formatNumber } from "./apps/calculator.js";
   import { fromFEN, newGame, perft, legalMoves, gameStatus, applyMove, chooseAiMove, squareIndex, squareName, AI_LEVELS } from "./apps/chess-engine.js";
   import { formatStopwatch, formatCountdown } from "./apps/timer.js";
@@ -94,7 +95,7 @@
     document.body.append(box);
     const warnings = [];
     // Apps that use the AI service get an offline stand-in, so these tests never open a connection.
-    const app = mountApp(box, { type, windowId: `test-${type}`, dictation: fakeDictation, services: { ai: fakeAI("closed") }, warn: (m) => warnings.push(m) });
+    const app = mountApp(box, { type, windowId: `test-${type}`, dictation: fakeDictation, services: { ai: fakeAI("closed"), voice: fakeSpeech().voice }, warn: (m) => warnings.push(m) });
     return { box, app, warnings };
   }
 
@@ -404,111 +405,219 @@
     two.app.destroy();
   });
 
-  // ---- Explore Object (fake AI client; no network) ----
+  // ---- Ask AI (fake AI client and fake browser speech; no network, no microphone) ----
 
-  function fakeAI(status = "open") {
-    const client = {
-      status, controls: [], requests: [], listeners: new Map(), statusListeners: new Set(), n: 0,
-      onStatus(fn) { this.statusListeners.add(fn); return () => this.statusListeners.delete(fn); },
-      subscribe(id, fn) { this.listeners.set(id, fn); return () => this.listeners.delete(id); },
-      newRequestId(id) { this.n += 1; return `${id}-r${this.n}`; },
-      control(type, id, fields = {}) { this.controls.push({ type, window_id: id, ...fields }); return this.status === "open"; },
-      request(id, fields, requestId = this.newRequestId(id)) {
-        let resolve;
-        const promise = new Promise((r) => { resolve = r; });
-        this.requests.push({ window_id: id, request_id: requestId, ...fields, resolve });
-        return { requestId, promise };
-      },
-      forget() {},
-      emit(message) { this.listeners.get(message.window_id)?.({ version: 1, ...message }); },
-    };
-    return client;
+  function controllable() {
+    let resolve;
+    const promise = new Promise((r) => { resolve = r; });
+    return { promise, resolve };
   }
 
-  function mountExplore(ai, width = 820, height = 520) {
+  function fakeAI(status = "open") {
+    return {
+      status, requests: [], crops: [], snapshots: [], n: 0,
+      onStatus() { return () => {}; },
+      newRequestId(id) { this.n += 1; return `${id}-r${this.n}`; },
+      request(id, fields, requestId = this.newRequestId(id)) {
+        const call = controllable();
+        this.requests.push({ window_id: id, request_id: requestId, ...fields, resolve: call.resolve });
+        return { requestId, promise: call.promise };
+      },
+      snapshot(id) {
+        const call = controllable();
+        this.snapshots.push({ window_id: id, resolve: call.resolve });
+        return { requestId: `${id}-snap`, promise: call.promise };
+      },
+      crop(id, capture_id, box) {
+        const call = controllable();
+        const requestId = this.newRequestId(id);
+        this.crops.push({ window_id: id, request_id: requestId, capture_id, box, resolve: call.resolve });
+        return { requestId, promise: call.promise };
+      },
+      forget() {},
+    };
+  }
+
+  // Stand-ins for the browser's SpeechRecognition and speechSynthesis, driven by the real voice.js.
+  function fakeSpeech() {
+    const recognizers = [];
+    class FakeRecognition {
+      constructor() { this.running = false; this.starts = 0; recognizers.push(this); }
+      start() { this.running = true; this.starts += 1; }
+      abort() { this.running = false; setTimeout(() => this.onend?.(), 0); }
+      stop() { this.abort(); }
+      say(words) {
+        const result = [{ transcript: words }];
+        result.isFinal = true;
+        this.onresult?.({ resultIndex: 0, results: [result] });
+      }
+    }
+    const synth = { spoken: [], speak(u) { this.spoken.push(u.text); setTimeout(() => u.onend?.(), 0); }, cancel() {} };
+    class FakeUtterance { constructor(words) { this.text = words; } }
+    return { voice: createVoice({ Recognition: FakeRecognition, synth, Utterance: FakeUtterance }), recognizers, synth };
+  }
+
+  const settle = async () => { for (let i = 0; i < 6; i += 1) await new Promise((r) => setTimeout(r, 5)); };
+  const PHOTO = { ok: true, capture_id: "capture-1", image: "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==", width: 1600, height: 900 };
+  const CROP = { ok: true, capture_id: "capture-2", image: "data:image/jpeg;base64,/9j/4AAQSkZJRgABAg==", width: 800, height: 450 };
+  const answer = (request, text, extra = {}) => request.resolve({ ok: true, request_id: request.request_id, window_id: request.window_id,
+    text, model: "gemini-test", provider: "gemini", sources: [], grounded: false, ...extra });
+
+  function mountAssistant({ ai = fakeAI(), speech = fakeSpeech(), launch = null, services = {}, width = 820, height = 520, id = "win-a" } = {}) {
     const box = document.createElement("div");
     box.className = "sandbox";
     box.style.width = `${width}px`;
     box.style.height = `${height}px`;
     document.body.append(box);
     const warnings = [];
-    const app = mountApp(box, { type: "explore", windowId: "win-e", dictation: fakeDictation, services: { ai }, warn: (m) => warnings.push(m) });
-    return { app, box, warnings };
+    const app = mountApp(box, { type: "assistant", windowId: id, launch, dictation: fakeDictation,
+      services: { ai, voice: speech.voice, ...services }, warn: (m) => warnings.push(m) });
+    return { app, box, warnings, ai, speech };
   }
 
-  const PIXEL = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==";
-
-  function captureAndIdentify(ai, fields = {}) {
-    ai.emit({ type: "explore.capture", window_id: "win-e", request_id: "auto-1", capture_id: "capture-1", image: PIXEL, trigger: "auto" });
-    ai.emit({ type: "ai.response", window_id: "win-e", request_id: "auto-1", ok: true, task: "identify", model: "gemini-test", provider: "gemini",
-      identification: { label: "coffee mug", confidence: "high", uncertain: false, object_present: true, summary: "A ceramic mug.", ...fields } });
+  // Window-local point at (u, v) inside a widget, for dragging over the photo.
+  function pointIn(box, id, u, v) {
+    const e = box.querySelector(`[data-widget-id="${id}"]`);
+    const [x, y, w, h] = ["left", "top", "width", "height"].map((k) => parseFloat(e.style[k]) / 100);
+    return { x: x + u * w, y: y + v * h };
   }
 
-  await test("Explore Object watches, then asks before any web lookup", async () => {
-    const ai = fakeAI();
-    const { app, box, warnings } = mountExplore(ai);
-    assertEqual(ai.controls[0].type, "explore.watch", "starts watching when mounted");
-    captureAndIdentify(ai); await tick();
-    assertEqual(textOf(box, "identity"), "coffee mug");
-    assertEqual(textOf(box, "question"), "Analyze further?");
-    assertEqual(box.querySelector('[data-widget-id="photo"] img')?.getAttribute("src"), PIXEL, "captured photo shown");
-    assertEqual(ai.requests.length, 0, "no lookup before Yes");
-    assertEqual(textOf(box, "footer"), "Live answer from Gemini (gemini-test)");
-    press(app, box, "no"); await tick();
-    assertEqual(ai.controls.at(-1).type, "explore.dismiss", "No returns to watching");
-    assertEqual(textOf(box, "heading"), "Place an object in the camera area");
-    assertEqual(ai.requests.length, 0);
+  function drag(app, from, to) {
+    app.handlePointer({ version: 1, type: "pointer_down", ...from, source: "mouse" });
+    app.handlePointer({ version: 1, type: "pointer_move", x: (from.x + to.x) / 2, y: (from.y + to.y) / 2, source: "mouse" });
+    app.handlePointer({ version: 1, type: "pointer_up", ...to, source: "mouse" });
+  }
+
+  await test("Ask AI voice: speech becomes a spoken, grounded question and the answer is read aloud", async () => {
+    const { app, box, ai, speech, warnings } = mountAssistant({ launch: { mode: "voice" } });
+    await tick();
+    const mic = speech.recognizers[0];
+    assertEqual(mic.running, true, "listening as soon as the chat opens");
+    assertEqual(textOf(box, "status"), "Listening...");
+    mic.say("What is a projector?"); await tick();
+    const [question] = ai.requests;
+    assertEqual([question.task, question.prompt, question.style, question.grounding, question.capture_id],
+      ["ask", "What is a projector?", "spoken", true, undefined]);
+    assertEqual(mic.running, false, "stops listening while Gemini answers");
+    assertEqual(textOf(box, "status"), "Thinking...");
+    answer(question, "It shows images on a surface.");
+    await settle();
+    assertEqual(speech.synth.spoken, ["It shows images on a surface."], "the answer is spoken");
+    assertEqual(textOf(box, "transcript"), "You: What is a projector?\n\nGemini: It shows images on a surface.");
+    assertEqual(mic.running, true, "listens again after speaking");
+    assertEqual(textOf(box, "footer"), "Live answers from Gemini (gemini-test)");
+    mic.say("And how bright is it?"); await tick();
+    assertEqual(ai.requests[1].context, [{ role: "user", text: "What is a projector?" }, { role: "model", text: "It shows images on a surface." }],
+      "earlier turns go along as context");
     assertEqual(warnings, []);
     app.destroy();
-    assertEqual(ai.controls.at(-1).type, "explore.release", "closing the window releases the camera area");
+    assertEqual(mic.running, false, "closing the chat releases the microphone");
   });
 
-  await test("Explore Object Yes looks it up and follow-ups keep the image and identity", async () => {
-    const ai = fakeAI();
-    const { app, box, warnings } = mountExplore(ai);
-    captureAndIdentify(ai); await tick();
-    press(app, box, "yes"); await tick();
-    const lookup = ai.requests[0];
-    assertEqual([lookup.task, lookup.capture_id, lookup.subject, lookup.grounding], ["ask", "capture-1", "coffee mug", true]);
-    lookup.resolve({ ok: true, request_id: lookup.request_id, window_id: "win-e", text: "A mug holds hot drinks.", model: "gemini-test",
-      sources: [{ title: "Mugs", url: "https://example.com/mugs" }], grounded: true });
-    await tick(); await tick();
-    assertEqual(textOf(box, "details").startsWith("A mug holds hot drinks."), true);
-    assertEqual(textOf(box, "source-0"), "example.com", "source link shown");
-    press(app, box, "suggest-0"); await tick();
-    const follow = ai.requests[1];
-    assertEqual([follow.prompt, follow.capture_id, follow.subject], ["What is it made of?", "capture-1", "coffee mug"]);
-    assertEqual(follow.context, [{ role: "model", text: "A mug holds hot drinks." }], "earlier answer passed as context");
-    ai.emit({ type: "ai.response", window_id: "win-e", request_id: "old-request", ok: false, task: "ask", error: { code: "api_error", message: "stale" } });
-    await tick(); await tick();
-    assertEqual(textOf(box, "details").includes("stale"), false, "reply for another request ignored");
-    follow.resolve({ ok: true, request_id: follow.request_id, window_id: "win-e", text: "Ceramic.", sources: [], grounded: false });
-    await tick(); await tick();
-    assertEqual(textOf(box, "details").includes("You: What is it made of?" + String.fromCharCode(10) + "Gemini: Ceramic."), true);
+  await test("Ask AI voice: only the newest chat listens, and Listen takes the microphone back", async () => {
+    const speech = fakeSpeech();
+    const first = mountAssistant({ speech, launch: { mode: "voice" }, id: "win-1" });
+    const second = mountAssistant({ speech, launch: { mode: "voice" }, id: "win-2" });
+    await tick();
+    assertEqual([textOf(first.box, "status"), textOf(second.box, "status")], ["Paused: another chat is listening", "Listening..."]);
+    speech.recognizers[0].say("hello"); await tick();
+    assertEqual([first.ai.requests.length, second.ai.requests.length], [0, 1], "speech goes to the listening chat only");
+    answer(second.ai.requests[0], "Hi.");
+    await settle();
+    press(first.app, first.box, "mic"); await tick();
+    assertEqual([textOf(first.box, "status"), textOf(second.box, "status")], ["Listening...", "Paused: another chat is listening"]);
+    press(first.app, first.box, "mic"); await tick();
+    assertEqual(textOf(first.box, "status"), "Muted");
+    first.app.destroy();
+    second.app.destroy();
+  });
+
+  await test("Ask AI screenshot: drag to crop, Gemini describes the crop, then a voice chat about it", async () => {
+    const { app, box, ai, speech, warnings } = mountAssistant({ launch: { mode: "screenshot", capture: PHOTO } });
+    await tick();
+    assertEqual(box.querySelector('[data-widget-id="photo"] img')?.getAttribute("src"), PHOTO.image, "desk photo shown");
+    assertEqual(app.flowActive(), true, "cropping is a step a thumbs-up must not interrupt");
+    assertEqual(box.querySelector('[data-widget-id="use-selection"]').classList.contains("surfaceos-widget--disabled"), true);
+    drag(app, pointIn(box, "photo", 0.25, 0.25), pointIn(box, "photo", 0.75, 0.75)); await tick();
+    assertEqual(box.querySelector('[data-widget-id="selection"]') !== null, true, "selection drawn");
+    press(app, box, "use-selection"); await tick();
+    const [cropCall] = ai.crops;
+    assertEqual([cropCall.capture_id, ...["x", "y", "width", "height"].map((k) => Math.round(cropCall.box[k] * 100) / 100)],
+      ["capture-1", 0.25, 0.25, 0.5, 0.5], "the dragged box, in photo coordinates");
+    cropCall.resolve({ ...CROP, request_id: cropCall.request_id, window_id: "win-a" }); await tick(); await tick();
+    const [describe] = ai.requests;
+    assertEqual([describe.task, describe.capture_id, describe.style], ["describe", "capture-2", "spoken"]);
+    assertEqual(speech.recognizers.length, 0, "not listening while the photo is described");
+    answer(describe, "A blue coffee mug.");
+    await settle();
+    assertEqual(speech.synth.spoken, ["A blue coffee mug."], "the description is spoken");
+    assertEqual(box.querySelector('[data-widget-id="thumb"] img')?.getAttribute("src"), CROP.image, "the crop stays in view");
+    assertEqual(speech.recognizers[0].running, true, "voice chat starts after the description");
+    assertEqual(app.flowActive(), false);
+    speech.recognizers[0].say("What is it made of?"); await tick();
+    const question = ai.requests[1];
+    assertEqual([question.capture_id, question.context], ["capture-2", [{ role: "model", text: "A blue coffee mug." }]],
+      "questions are about the cropped photo");
     assertEqual(warnings, []);
     app.destroy();
   });
 
-  await test("Explore Object shows uncertainty, errors, object leaving, and offline state", async () => {
-    const ai = fakeAI();
-    const { app, box } = mountExplore(ai);
-    captureAndIdentify(ai, { uncertain: true, confidence: "low", label: "stapler", summary: "Hard to see." }); await tick();
-    assertEqual(textOf(box, "identity"), "Maybe: stapler");
-    press(app, box, "yes"); await tick();
-    assertEqual(ai.requests[0].subject, undefined, "an uncertain label is not passed as fact");
-    ai.requests[0].resolve({ ok: false, request_id: ai.requests[0].request_id, window_id: "win-e", error: { code: "timeout", message: "Gemini did not answer within 30 seconds." } });
-    await tick(); await tick();
-    assertEqual(textOf(box, "body"), "Gemini did not answer within 30 seconds.");
-    ai.emit({ type: "explore.object_left", window_id: "win-e", capture_id: "capture-1" }); await tick();
-    assertEqual(textOf(box, "footer"), "The object left the camera area. Its photo stays here.");
-    press(app, box, "analyze"); await tick();
-    assertEqual(ai.controls.at(-1).type, "explore.analyze_frame");
-    assertEqual(textOf(box, "heading"), "Identifying with Gemini...");
+  await test("Ask AI screenshot: tiny drags are rejected, Whole photo skips cropping, Cancel closes the window", async () => {
+    const closed = [];
+    const one = mountAssistant({ launch: { mode: "screenshot", capture: PHOTO }, services: { closeWindow: (id) => closed.push(id) } });
+    await tick();
+    const p = pointIn(one.box, "photo", 0.5, 0.5);
+    drag(one.app, p, { x: p.x + 0.004, y: p.y + 0.004 }); await tick();
+    assertEqual(textOf(one.box, "hint"), "That box is too small. Drag across the part you want.");
+    press(one.app, one.box, "use-whole"); await tick();
+    assertEqual([one.ai.crops.length, one.ai.requests[0].task, one.ai.requests[0].capture_id], [0, "describe", "capture-1"]);
+    one.app.destroy();
+    const two = mountAssistant({ launch: { mode: "screenshot", capture: PHOTO }, services: { closeWindow: (id) => closed.push(id) } });
+    await tick();
+    press(two.app, two.box, "cancel"); await tick();
+    assertEqual(closed, ["win-a"], "Cancel asks the shell to close the chat window");
+    assertEqual(two.app.cancelFlow(), true, "thumbs-down or Esc during cropping also backs out");
+    two.app.destroy();
+  });
+
+  await test("Ask AI from the program picker: Voice or Screenshot inside the window", async () => {
+    const shots = [];
+    const captureDesk = (id) => { const call = controllable(); shots.push({ id, resolve: call.resolve }); return call.promise; };
+    const { app, box, speech } = mountAssistant({ services: { captureDesk } });
+    await tick();
+    assertEqual(textOf(box, "title"), "Ask AI");
+    press(app, box, "screenshot"); await tick();
+    assertEqual([shots.length, shots[0].id, textOf(box, "capturing")], [1, "win-a", "Taking a photo of the desk..."],
+      "the photo comes through the shell, which blanks the projection");
+    shots[0].resolve({ ok: false, error: { message: "No camera frames are arriving." } }); await tick(); await tick();
+    assertEqual(textOf(box, "body"), "No camera frames are arriving.", "a failed photo is explained");
+    press(app, box, "screenshot"); await tick();
+    shots[1].resolve(PHOTO); await tick(); await tick();
+    assertEqual(box.querySelector('[data-widget-id="photo"] img')?.getAttribute("src"), PHOTO.image);
     app.destroy();
-    const offline = mountExplore(fakeAI("closed"));
-    assertEqual(textOf(offline.box, "heading"), "AI service offline");
-    assertEqual(offline.box.querySelector('[data-widget-id="analyze"]').classList.contains("surfaceos-widget--disabled"), true);
-    offline.app.destroy();
+    const voice = mountAssistant({ speech });
+    await tick();
+    press(voice.app, voice.box, "voice"); await tick();
+    assertEqual(textOf(voice.box, "status"), "Listening...");
+    voice.app.destroy();
+  });
+
+  await test("Ask AI shows answer errors and works typed when voice is unavailable", async () => {
+    const noVoice = { voice: createVoice({ Recognition: null, synth: null, Utterance: null }), recognizers: [], synth: null };
+    const { app, box, ai } = mountAssistant({ speech: noVoice, launch: { mode: "voice" } });
+    await tick();
+    assertEqual(textOf(box, "status"), "Voice unavailable");
+    assertEqual(textOf(box, "footer"), "Voice input needs Chrome or Edge. Type your question instead.");
+    const field = box.querySelector('[data-widget-id="question"]');
+    field.value = "Is it working?";
+    field.dispatchEvent(new Event("input"));
+    field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" })); await tick();
+    const [typed] = ai.requests;
+    assertEqual(typed.prompt, "Is it working?", "typed questions work without a microphone");
+    typed.resolve({ ok: false, request_id: typed.request_id, window_id: "win-a", error: { code: "timeout", message: "Gemini did not answer in time." } });
+    await settle();
+    assertEqual(textOf(box, "transcript").endsWith("Gemini could not answer: Gemini did not answer in time."), true);
+    app.destroy();
   });
 
   // ---- Every app renders valid layouts at several window shapes ----

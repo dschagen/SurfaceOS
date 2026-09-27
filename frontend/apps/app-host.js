@@ -16,7 +16,7 @@ const DEFAULT_SERVICES = {
 
 let sharedDictation = null;
 
-export function mountApp(container, { type, windowId, onAction, dictation, services, warn } = {}) {
+export function mountApp(container, { type, windowId, onAction, dictation, services, warn, launch } = {}) {
   const definition = APPS[type];
   if (!definition) throw new Error(`Unknown SurfaceOS app type: ${type}`);
   if (typeof windowId !== 'string' || !windowId) throw new Error('mountApp needs a windowId');
@@ -92,6 +92,8 @@ export function mountApp(container, { type, windowId, onAction, dictation, servi
     },
     dictation: dictation || (sharedDictation ??= createBrowserDictation()),
     services: { ...DEFAULT_SERVICES, ...services },
+    // How the shell opened this window, for apps that start in a particular state.
+    launch: launch ?? null,
   };
 
   const app = definition.create(ctx);
@@ -124,6 +126,17 @@ export function mountApp(container, { type, windowId, onAction, dictation, servi
       const used = app.receiveText?.(text) ?? false;
       if (used) update();
       return used;
+    },
+    // Backs out of an app's current step (for example cropping). True when the window should close.
+    cancelFlow() {
+      if (destroyed) return false;
+      const used = app.cancelFlow?.() ?? false;
+      if (used) update();
+      return used;
+    },
+    // True while the app is in a step that a new thumbs-up must not interrupt.
+    flowActive() {
+      return !destroyed && Boolean(app.flowActive?.());
     },
     destroy() {
       if (destroyed) return;

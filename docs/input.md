@@ -15,7 +15,7 @@ WebSocket at `ws://localhost:8765` (see `config/settings.json`). One JSON messag
 
 ## Calibration (browser to tracker and back)
 
-This is the only message the browser sends. The shell projects a grid of ArUco `DICT_4X4_50`
+Apart from the Ask AI requests in `docs/ai.md`, which use their own connection, this is the only message the browser sends. The shell projects a grid of ArUco `DICT_4X4_50`
 markers (ids 0-11, drawn by `surfaceos-shell/frontend/scripts/markers.js`) inside one surface,
 waits about 0.6 s, then sends:
 
@@ -50,7 +50,8 @@ Every activating gesture must be held for `gestures.hold_s` (0.5 s in `config/se
 | Gesture | Event | Shell response |
 | --- | --- | --- |
 | One-hand pinch held 0.5 s | `pointer_down`, then `pointer_up` on release | Click; keep pinching to drag. A shorter pinch sends nothing. |
-| Thumbs down held 0.5 s | `thumbs_down` with `x`, `y` | Yes/No, then **Window / Surface**, then pick the target. |
+| Thumbs down held 0.5 s | `thumbs_down` with `x`, `y` | Yes/No, then **Window / Surface**, then pick the target. During an Ask AI step it cancels that step instead. |
+| Thumbs up held 0.5 s | `thumbs_up` with `x`, `y` | Ask AI next to the hand: **Voice / Screenshot / Cancel**. See `docs/ai.md`. |
 | Peace sign held 0.5 s | `peace_sign` with `x`, `y` | Yes/No, then **Move / Resize / Change surface**, then pick the window. |
 | Index finger pointing | `scroll` with `dy` while held, with a short coast after a flick | Scrolls lists and window content. |
 | Both hands pinched and still for 0.5 s | `two_hand_hold` with `x`, `y` | Yes/No, then **Make Window / Screenshot / New Surface**. |
@@ -63,9 +64,9 @@ cursor ring can fill. It is sent only when the value changes, and returns to 0 w
 { "version": 1, "type": "hold_progress", "progress": 0.6, "source": "hand" }
 ```
 
-The static poses come from MediaPipe's gesture recognizer (`Thumb_Down`, `Victory`); a pose must be
-stable for `static_gestures.stable_frames` frames before its 0.5 s hold starts. Thumbs up is reserved
-for Ask AI and is not sent yet. `two_hand_single_pinch`, `two_hand_double_pinch` and the one-hand
+The static poses come from MediaPipe's gesture recognizer (`Thumb_Down`, `Thumb_Up`, `Victory`); a pose must be
+stable for `static_gestures.stable_frames` frames before its 0.5 s hold starts. Like the other poses, a
+thumbs up fires once per hold, from either hand. `two_hand_single_pinch`, `two_hand_double_pinch` and the one-hand
 `double_pinch` are no longer sent.
 
 ## Event order within one frame

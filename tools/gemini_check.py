@@ -1,4 +1,4 @@
-"""Live check of the Gemini service with a real API key. Makes three small, billable requests.
+"""Live check of the Gemini service with a real API key. Makes four small, billable requests.
 
 Run from the repository root after setting GEMINI_API_KEY:
   .venv\\Scripts\\python tools\\gemini_check.py [photo.jpg]
@@ -32,8 +32,6 @@ def timed(label, call):
         print("  (web search quota reached; answered without a web search)")
     for source in result.sources:
         print(f"  source: {source['title']} - {source['url']}")
-    if result.identification:
-        print(f"  identification: {result.identification}")
     return result
 
 
@@ -59,10 +57,9 @@ def main() -> int:
     jpeg = encode_jpeg(image)
     timed("Text question", lambda: service.ask("In one sentence, what is a projector?"))
     timed("Grounded question", lambda: service.ask("What is today's date, and one current news headline?", grounding=True))
-    identified = timed("Identify image", lambda: service.identify(jpeg))
-    if identified and identified.identification and not identified.identification["uncertain"]:
-        timed("Grounded follow-up", lambda: service.ask("Tell me two facts about it.", image=jpeg,
-                                                        subject=identified.identification["label"], grounding=True))
+    timed("Describe image", lambda: service.describe(jpeg))
+    timed("Spoken question about the image", lambda: service.ask("What is this, and what is it used for?", image=jpeg,
+                                                                 grounding=True, style="spoken"))
     return 0
 
 
