@@ -38,7 +38,7 @@ The workspace shows one calibrated pointer: a 15 px ring following the primary h
 
 Screenshot offers **Capture window** or **Capture physical area** when windows exist. A window capture renders its content to a PNG via the browser; some live video, remote content, and cross-origin assets may not render. A physical capture requests the browser camera, temporarily hides projected UI, and rectifies the selected region through the camera alignment. It may need ambient light and camera permission. The browser and Python tracker must see the same camera view; if the operating system does not allow both to open one camera, physical capture cannot run alongside tracking without a shared camera stream. If the desired physical region is occupied by another window, place the resulting screenshot in free space after capture.
 
-Ask AI opens a question window with text, microphone, and camera controls. Speech uses the browser's speech recognition when available. Camera capture attaches a local image through the same physical capture path. **No model endpoint is connected**: Send gives a clear unavailable message and does not invent an answer.
+Ask AI opens with a thumbs-up (or **Ask AI** in the program picker) and talks to Gemini through `src/main.py`; see `docs/ai.md` and `WIDGETS.md`. Its desk photo comes from the hand tracker's camera, not the browser, with the projection blanked while it is taken. Speech uses the browser's speech recognition and synthesis (Chrome or Edge); the page needs one mouse click before the browser allows the microphone and spoken replies.
 
 ## Integration contract
 

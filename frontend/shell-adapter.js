@@ -5,6 +5,9 @@
 //   mountApp(windowRecord, host, onAction) optional: runs a widget app chosen from `apps`
 //   sync(windowRecords)                    optional: after each shell render, drops content of closed windows
 //   handleKey(windowId, event)             optional: keyboard fallback for the focused window
+//   cancelFlow(windowId)                   optional: backs out of an app step; true means close the window
+//   flowActive()                           optional: true while any app is in a step a thumbs-up must not interrupt
+//   snapshot()                             optional: asks the AI service for one camera photo of the desk
 //
 // The shell rebuilds window frames on every render, so each window's content lives in a persistent
 // root element that is moved into the new host. That keeps app state, canvases, and videos alive.
@@ -15,6 +18,7 @@
 
 import { createWidgetRenderer } from './widget-renderer.js';
 import { mountApp, APPS } from './apps/app-host.js';
+import { sharedAIClient } from './ai-client.js';
 
 const HAND_EVENT = 'surfaceos:window-pointer';
 
@@ -116,7 +120,7 @@ export function createShellAdapter() {
     },
 
     mountApp(windowRecord, host, onAction) {
-      const { id, content } = windowRecord;
+      const { id, content, launch } = windowRecord;
       let entry = entries.get(id);
       if (!entry || entry.kind !== 'app' || entry.content !== content) {
         destroy(id);
@@ -124,7 +128,12 @@ export function createShellAdapter() {
         entry = { kind: 'app', content, root, onAction };
         // Attach before mounting so the app lays out against the real window size.
         host.append(root);
-        entry.app = mountApp(root, { type: content, windowId: id, onAction: (action) => entry.onAction?.(action) });
+        // The shell blanks the projection for desk photos and closes windows; apps reach both through services.
+        const services = {
+          captureDesk: (windowId) => window.SurfaceOS?.captureDesk?.(windowId) ?? sharedAIClient().snapshot(windowId).promise,
+          closeWindow: (windowId) => window.SurfaceOS?.closeWindow?.(windowId),
+        };
+        entry.app = mountApp(root, { type: content, windowId: id, launch, services, onAction: (action) => entry.onAction?.(action) });
         entry.handler = (event) => entry.app.handlePointer(event);
         entries.set(id, entry);
       }
@@ -145,6 +154,18 @@ export function createShellAdapter() {
 
     handleKey(windowId, event) {
       return entries.get(windowId)?.app?.handleKey(event) ?? false;
+    },
+
+    cancelFlow(windowId) {
+      return entries.get(windowId)?.app?.cancelFlow() ?? false;
+    },
+
+    flowActive() {
+      return [...entries.values()].some((entry) => entry.app?.flowActive());
+    },
+
+    snapshot(windowId) {
+      return sharedAIClient().snapshot(windowId).promise;
     },
   };
 }

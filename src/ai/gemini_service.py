@@ -5,7 +5,6 @@ Requests are built as plain dictionaries, which the google-genai SDK accepts, so
 exactly what would be sent. Calls block; run them on a worker thread, never the camera loop.
 """
 
-import json
 import os
 import time
 from dataclasses import dataclass, field
@@ -16,31 +15,22 @@ DEFAULT_MODEL = "gemini-3.8-flash"
 DEFAULT_TIMEOUT_S = 30.0
 MAX_SOURCES = 6
 RETRY_DELAY_S = 1.5
-MAX_LABEL_CHARS = 80
-MAX_SUMMARY_CHARS = 400
 
 SYSTEM_INSTRUCTION = (
     "You answer inside SurfaceOS, a projected workspace on a desk. Answers appear in a small window: "
     "use plain text without markdown, at most about 120 words. If you are not sure, say so plainly."
 )
 
-IDENTIFY_PROMPT = (
-    "This photo comes from a camera looking at a desk. Identify the main physical object. "
-    "Give a short common name of two to five words. Only name a brand or model if it is clearly readable. "
-    "If there is no clear object, or you cannot tell what it is, set confidence to low and describe what "
-    "you can see instead of guessing."
+# Appended to the system instruction for answers the browser reads aloud.
+SPOKEN_INSTRUCTION = (
+    " This answer will be spoken aloud: reply in one to three short, conversational sentences, "
+    "with no lists, headings, symbols, or web addresses."
 )
 
-IDENTIFY_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "object_present": {"type": "boolean"},
-        "label": {"type": "string"},
-        "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
-        "summary": {"type": "string"},
-    },
-    "required": ["object_present", "label", "confidence", "summary"],
-}
+DESCRIBE_PROMPT = (
+    "This image is part of a photo taken by a camera looking down at a desk. "
+    "In one sentence, say what it shows. If it is unclear, say so instead of guessing."
+)
 
 
 class AIServiceError(Exception):
@@ -58,15 +48,12 @@ class AIResult:
     grounded: bool = False
     # True when search was requested but unavailable, so the answer came without a web lookup.
     search_unavailable: bool = False
-    identification: dict | None = None
     # Who produced the answer. Only real Gemini responses say "gemini"; test doubles must not.
     provider: str = "gemini"
 
     def to_message_fields(self) -> dict:
         fields = {"text": self.text, "sources": self.sources, "grounded": self.grounded,
                   "model": self.model, "provider": self.provider}
-        if self.identification is not None:
-            fields["identification"] = self.identification
         if self.search_unavailable:
             fields["search_unavailable"] = True
         return fields
@@ -104,26 +91,6 @@ def _response_text(response) -> str:
         suffix = f" (finish reason: {getattr(reason, 'name', reason)})" if reason else ""
         raise AIServiceError(contract.ERR_EMPTY, f"Gemini returned no answer{suffix}.")
     return text.strip()
-
-
-def parse_identification(raw: str) -> dict:
-    """Normalizes the identify JSON. Anything unparseable or unsure becomes an uncertain result."""
-    try:
-        data = json.loads(raw)
-    except (TypeError, ValueError):
-        data = None
-    if not isinstance(data, dict):
-        return {"label": "", "confidence": "low", "uncertain": True, "object_present": False,
-                "summary": "The identification could not be read."}
-    label = str(data.get("label") or "").strip()[:MAX_LABEL_CHARS]
-    confidence = data.get("confidence") if data.get("confidence") in ("high", "medium", "low") else "low"
-    present = data.get("object_present") is True
-    if not present:
-        label = ""
-    summary = str(data.get("summary") or "").strip()[:MAX_SUMMARY_CHARS]
-    uncertain = not present or not label or confidence == "low"
-    return {"label": label, "confidence": confidence, "uncertain": uncertain,
-            "object_present": present, "summary": summary}
 
 
 class GeminiService:
@@ -206,36 +173,35 @@ class GeminiService:
     def _image_part(image: bytes, mime_type: str) -> dict:
         return {"inline_data": {"data": image, "mime_type": mime_type}}
 
-    def identify(self, image: bytes, mime_type: str = "image/jpeg") -> AIResult:
+    @staticmethod
+    def _config(style: str, temperature: float) -> dict:
+        instruction = SYSTEM_INSTRUCTION + (SPOKEN_INSTRUCTION if style == "spoken" else "")
+        return {"system_instruction": instruction, "temperature": temperature}
+
+    def describe(self, image: bytes, mime_type: str = "image/jpeg", style: str = "text") -> AIResult:
+        """One sentence about what an image shows. Never searches the web."""
         if not image:
-            raise AIServiceError(contract.ERR_IMAGE, "The captured image is empty.")
-        config = {"response_mime_type": "application/json", "response_json_schema": IDENTIFY_SCHEMA,
-                  "temperature": 0.2}
-        response = self._generate([{"role": "user", "parts": [self._image_part(image, mime_type), {"text": IDENTIFY_PROMPT}]}], config)
-        identification = parse_identification(_response_text(response))
-        if identification["uncertain"]:
-            guess = f" It might be: {identification['label']}." if identification["label"] else ""
-            text = f"Not sure what this is.{guess} {identification['summary']}".strip()
-        else:
-            text = identification["label"]
-        return AIResult(text=text, model=self.model, identification=identification, provider=self.provider)
+            raise AIServiceError(contract.ERR_IMAGE, "The image is empty.")
+        parts = [self._image_part(image, mime_type), {"text": DESCRIBE_PROMPT}]
+        response = self._generate([{"role": "user", "parts": parts}], self._config(style, 0.2))
+        return AIResult(text=_response_text(response), model=self.model, provider=self.provider)
 
     def ask(self, prompt: str, image: bytes | None = None, mime_type: str = "image/jpeg",
             context: list[contract.Turn] | None = None, subject: str | None = None,
-            grounding: bool = False) -> AIResult:
+            grounding: bool = False, style: str = "text") -> AIResult:
         """Answers a question. With grounding the model may run Google Search for current facts."""
         if not prompt.strip():
             raise AIServiceError(contract.ERR_INVALID, "The question is empty.")
         lines = []
         if subject:
-            lines.append(f"The object in the photo was identified as: {subject}.")
+            lines.append(f"The conversation is about: {subject}.")
         if context:
             lines.append("Conversation so far:")
             lines.extend(f"{'User' if turn.role == 'user' else 'Assistant'}: {turn.text}" for turn in context)
         lines.append(f"Question: {prompt}" if lines else prompt)
         parts = [self._image_part(image, mime_type)] if image else []
         parts.append({"text": "\n".join(lines)})
-        config = {"system_instruction": SYSTEM_INSTRUCTION, "temperature": 0.4}
+        config = self._config(style, 0.4)
         contents = [{"role": "user", "parts": parts}]
         search_unavailable = False
         if grounding:

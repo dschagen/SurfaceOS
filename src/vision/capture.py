@@ -10,11 +10,11 @@ class CaptureError(ValueError):
     pass
 
 
-def crop_camera_box(frame, box: tuple[float, float, float, float], padding: float = 0.15) -> np.ndarray:
-    """Copies a padded camera-normalized box out of a frame, so the frame can be reused afterwards."""
-    if frame is None or getattr(frame, "size", 0) == 0:
-        raise CaptureError("The camera frame is empty.")
-    height, width = frame.shape[:2]
+def crop_normalized(image, box: tuple[float, float, float, float], padding: float = 0.0) -> np.ndarray:
+    """Copies a normalized (x, y, width, height) box out of an image, so the image can be reused."""
+    if image is None or getattr(image, "size", 0) == 0:
+        raise CaptureError("The image is empty.")
+    height, width = image.shape[:2]
     x, y, w, h = box
     pad_x, pad_y = w * padding, h * padding
     left = int(max(0.0, x - pad_x) * width)
@@ -27,9 +27,9 @@ def crop_camera_box(frame, box: tuple[float, float, float, float], padding: floa
         half = MIN_CROP_PIXELS // 2
         left, right = max(cx - half, 0), min(cx + half, width)
         top, bottom = max(cy - half, 0), min(cy + half, height)
-    crop = frame[top:bottom, left:right]
+    crop = image[top:bottom, left:right]
     if crop.size == 0:
-        raise CaptureError("The capture area is outside the camera frame.")
+        raise CaptureError("The selected area is outside the image.")
     return crop.copy()
 
 
@@ -45,3 +45,10 @@ def encode_jpeg(image: np.ndarray, max_side: int = MAX_SIDE, quality: int = JPEG
     if not ok:
         raise CaptureError("The image could not be encoded.")
     return encoded.tobytes()
+
+
+def decode_jpeg(data: bytes) -> np.ndarray:
+    image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR) if data else None
+    if image is None:
+        raise CaptureError("The stored image could not be read.")
+    return image

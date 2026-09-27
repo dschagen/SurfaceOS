@@ -2,55 +2,39 @@
 
 This module is the single definition of the messages; docs/ai.md describes the same shapes for
 browser code. Every request carries the window_id and request_id of the window that asked, and
-every response echoes both, so a window can ignore replies meant for other windows or superseded
-requests.
+every reply echoes both, so a window can ignore replies meant for other windows or superseded
+requests. Replies go only to the browser connection that asked.
 
 Browser -> server
-  ai.request             {window_id, request_id, task, prompt?, capture_id?, image?, subject?, context?, grounding?}
-  explore.watch          {window_id}                watch the camera area for this window
-  explore.pause          {window_id}
-  explore.resume         {window_id}
-  explore.dismiss        {window_id}                "No" or "watch for a new object"
-  explore.analyze_frame  {window_id, request_id}    capture now instead of waiting for a trigger
-  explore.release        {window_id}                window closed
+  ai.request   {window_id, request_id, task, prompt?, capture_id?, image?, subject?, context?, grounding?, style?}
+  ai.snapshot  {window_id, request_id}                       one full camera frame of the desk
+  ai.crop      {window_id, request_id, capture_id, box}       part of a stored capture as a new capture
 
-Server -> browser (only to the connection that owns the window)
-  ai.response            {window_id, request_id, ok, task, ...result or error}
-  explore.status         {window_id, state, detail}
-  explore.capture        {window_id, request_id, capture_id, image, trigger}
-  explore.object_left    {window_id, capture_id}
+Server -> browser
+  ai.response  {window_id, request_id, ok, task, text, sources, grounded, model, provider, ...} or error
+  ai.capture   {window_id, request_id, ok, capture_id, image, width, height} or error
 """
 
 import base64
+import math
 from dataclasses import dataclass, field
 
 VERSION = 1
 
 AI_REQUEST = "ai.request"
+AI_SNAPSHOT = "ai.snapshot"
+AI_CROP = "ai.crop"
 AI_RESPONSE = "ai.response"
-EXPLORE_WATCH = "explore.watch"
-EXPLORE_PAUSE = "explore.pause"
-EXPLORE_RESUME = "explore.resume"
-EXPLORE_DISMISS = "explore.dismiss"
-EXPLORE_ANALYZE_FRAME = "explore.analyze_frame"
-EXPLORE_RELEASE = "explore.release"
-EXPLORE_STATUS = "explore.status"
-EXPLORE_CAPTURE = "explore.capture"
-EXPLORE_OBJECT_LEFT = "explore.object_left"
+AI_CAPTURE = "ai.capture"
 
-EXPLORE_REQUESTS = {EXPLORE_WATCH, EXPLORE_PAUSE, EXPLORE_RESUME, EXPLORE_DISMISS,
-                    EXPLORE_ANALYZE_FRAME, EXPLORE_RELEASE}
+REQUEST_TYPES = {AI_REQUEST, AI_SNAPSHOT, AI_CROP}
 
-# ask: answer a question, optionally about an image. identify: short identification of an image.
-TASKS = {"ask", "identify"}
+# ask: answer a question, optionally about an image. describe: one sentence about an image.
+TASKS = {"ask", "describe"}
+# spoken: short plain sentences meant to be read aloud. text: normal written answer.
+STYLES = {"text", "spoken"}
 
-# Explore states reported to the owning window.
-STATE_WATCHING = "watching"
-STATE_PAUSED = "paused"
-STATE_HOLDING = "holding"         # showing a captured object; no new captures until dismissed
-STATE_INACTIVE = "inactive"       # another window took over the camera area
-
-# Error codes in ai.response {ok: false, error: {code, message}}.
+# Error codes in {ok: false, error: {code, message}}.
 ERR_INVALID = "invalid_request"
 ERR_MISSING_KEY = "missing_key"
 ERR_SDK_MISSING = "sdk_missing"
@@ -69,6 +53,8 @@ MAX_SUBJECT_CHARS = 200
 # Browser messages are limited to 256 KB by the server; base64 adds a third.
 MAX_IMAGE_BYTES = 150_000
 IMAGE_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
+# A crop smaller than this share of the photo in either direction is almost certainly a stray tap.
+MIN_CROP_FRACTION = 0.02
 
 
 class ContractError(ValueError):
@@ -95,6 +81,16 @@ class AIRequest:
     subject: str | None = None
     context: list[Turn] = field(default_factory=list)
     grounding: bool = False
+    style: str = "text"
+
+
+@dataclass
+class CropRequest:
+    window_id: str
+    request_id: str
+    capture_id: str
+    # Image-normalized x, y, width, height, clamped to the image.
+    box: tuple[float, float, float, float]
 
 
 def _text_id(message: dict, key: str) -> str:
@@ -124,6 +120,9 @@ def parse_ai_request(message: dict) -> AIRequest:
         raise ContractError(f"prompt must be a string of at most {MAX_PROMPT_CHARS} characters")
     if task == "ask" and not prompt.strip():
         raise ContractError("an ask request needs a prompt")
+    style = message.get("style", "text")
+    if style not in STYLES:
+        raise ContractError(f"style must be one of {sorted(STYLES)}")
 
     capture_id = message.get("capture_id")
     if capture_id is not None:
@@ -144,8 +143,8 @@ def parse_ai_request(message: dict) -> AIRequest:
             raise ContractError("image data is not valid base64", ERR_IMAGE) from error
         if not image_bytes:
             raise ContractError("image data is empty", ERR_IMAGE)
-    if task == "identify" and capture_id is None and image_bytes is None:
-        raise ContractError("an identify request needs capture_id or image")
+    if task == "describe" and capture_id is None and image_bytes is None:
+        raise ContractError("a describe request needs capture_id or image")
 
     subject = message.get("subject")
     if subject is not None and (not isinstance(subject, str) or len(subject) > MAX_SUBJECT_CHARS):
@@ -162,7 +161,30 @@ def parse_ai_request(message: dict) -> AIRequest:
 
     return AIRequest(window_id=window_id, request_id=request_id, task=task, prompt=prompt.strip(),
                      capture_id=capture_id, image_bytes=image_bytes, image_mime=image_mime,
-                     subject=subject.strip() if subject else None, context=context, grounding=message.get("grounding") is True)
+                     subject=subject.strip() if subject else None, context=context,
+                     grounding=message.get("grounding") is True, style=style)
+
+
+def parse_crop(message: dict) -> CropRequest:
+    """Validates an ai.crop. The box is clamped to the image and must not be tiny."""
+    window_id = window_id_of(message)
+    request_id = request_id_of(message)
+    capture_id = _text_id(message, "capture_id")
+    box = message.get("box")
+    if not isinstance(box, dict):
+        raise ContractError("box must be {x, y, width, height} in image-normalized coordinates")
+    try:
+        x, y, width, height = (float(box[key]) for key in ("x", "y", "width", "height"))
+    except (KeyError, TypeError, ValueError) as error:
+        raise ContractError("box needs numeric x, y, width, and height") from error
+    if not all(math.isfinite(v) for v in (x, y, width, height)):
+        raise ContractError("box values must be finite numbers")
+    left, top = max(0.0, min(x, x + width)), max(0.0, min(y, y + height))
+    right, bottom = min(1.0, max(x, x + width)), min(1.0, max(y, y + height))
+    if right - left < MIN_CROP_FRACTION or bottom - top < MIN_CROP_FRACTION:
+        raise ContractError("the selected area is too small; drag a larger box")
+    box = tuple(round(value, 6) for value in (left, top, right - left, bottom - top))
+    return CropRequest(window_id, request_id, capture_id, box)
 
 
 def message(message_type: str, **fields) -> dict:
@@ -178,5 +200,11 @@ def ai_error(window_id: str | None, request_id: str | None, code: str, text: str
                    error={"code": code, "message": text})
 
 
-def explore_status(window_id: str, state: str, detail: str = "") -> dict:
-    return message(EXPLORE_STATUS, window_id=window_id, state=state, detail=detail)
+def capture_reply(window_id: str, request_id: str, capture_id: str, image_url: str, width: int, height: int) -> dict:
+    return message(AI_CAPTURE, window_id=window_id, request_id=request_id, ok=True, capture_id=capture_id,
+                   image=image_url, width=width, height=height)
+
+
+def capture_error(window_id: str | None, request_id: str | None, code: str, text: str) -> dict:
+    return message(AI_CAPTURE, window_id=window_id, request_id=request_id, ok=False,
+                   error={"code": code, "message": text})
