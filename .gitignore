@@ -6,3 +6,4 @@ models/*.task
 .vscode/
 CLAUDE.md
 AGENTS.md
+.env
