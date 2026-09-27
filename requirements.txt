@@ -3,3 +3,4 @@ mediapipe
 numpy
 websockets
 pytest
+google-genai==2.25.0

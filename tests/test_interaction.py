@@ -54,6 +54,16 @@ class InteractionTests(unittest.TestCase):
         _, events = self.step([make_hand(pinch_ratio=OPEN)])
         self.assertEqual(types(events), [POINTER_MOVE, POINTER_UP])
 
+    def test_release_is_sent_from_last_firmly_pinched_position(self):
+        for _ in range(6):
+            self.step([make_hand(tip=(0.4, 0.5), pinch_ratio=PINCHED)])
+        # Fingers opening: still pinching by hysteresis, but the fingertip drifts.
+        self.step([make_hand(tip=(0.43, 0.52), pinch_ratio=0.3)])
+        _, events = self.step([make_hand(tip=(0.47, 0.55), pinch_ratio=OPEN)])
+        up = next(e for e in events if e.type == POINTER_UP)
+        self.assertAlmostEqual(up.x, 0.6)    # mirrored 0.4, where the fingers were closed
+        self.assertAlmostEqual(up.y, 0.5)
+
     def test_short_pinch_sends_no_press(self):
         found = self.hold_pinch(3)
         _, events = self.step([make_hand(pinch_ratio=OPEN)])
