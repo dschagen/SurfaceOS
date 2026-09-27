@@ -9,6 +9,10 @@
 const DEFAULT_URL = 'ws://localhost:8765';
 const RETRY_MS = 2000;
 export const REQUEST_TIMEOUT_MS = 45000;
+// A desk photo arrives within a second when the tracker is running.
+export const SNAPSHOT_TIMEOUT_MS = 6000;
+
+const REPLY_TYPES = { 'ai.request': 'ai.response', 'ai.snapshot': 'ai.capture', 'ai.crop': 'ai.capture' };
 
 function serverUrl() {
   const params = new URLSearchParams(location.search);
@@ -19,12 +23,15 @@ function serverUrl() {
   return DEFAULT_URL;
 }
 
+function failure(type, windowId, requestId, code, message) {
+  return { version: 1, type, window_id: windowId, request_id: requestId, ok: false, error: { code, message } };
+}
+
 export function createAIClient({ url = serverUrl(), WebSocketImpl = window.WebSocket, timeoutMs = REQUEST_TIMEOUT_MS } = {}) {
   let socket = null;
   let status = 'connecting'; // 'connecting' | 'open' | 'closed'
   let counter = 0;
-  const pending = new Map(); // request_id -> { windowId, resolve, timer }
-  const listeners = new Map(); // window_id -> Set(fn)
+  const pending = new Map(); // request_id -> { windowId, replyType, resolve, timer }
   const statusListeners = new Set();
 
   function setStatus(next) {
@@ -35,7 +42,7 @@ export function createAIClient({ url = serverUrl(), WebSocketImpl = window.WebSo
 
   function finish(requestId, reply) {
     const entry = pending.get(requestId);
-    if (!entry) return false;
+    if (!entry || reply.type !== entry.replyType) return false;
     pending.delete(requestId);
     clearTimeout(entry.timer);
     entry.resolve(reply);
@@ -44,14 +51,7 @@ export function createAIClient({ url = serverUrl(), WebSocketImpl = window.WebSo
 
   function failAll(code, message) {
     for (const [requestId, entry] of [...pending]) {
-      finish(requestId, { version: 1, type: 'ai.response', window_id: entry.windowId, request_id: requestId, ok: false, error: { code, message } });
-    }
-  }
-
-  function deliver(message) {
-    if (message.type === 'ai.response' && finish(message.request_id, message)) return;
-    for (const fn of listeners.get(message.window_id) ?? []) {
-      try { fn(message); } catch (error) { console.error('AI listener failed', error); }
+      finish(requestId, failure(entry.replyType, entry.windowId, requestId, code, message));
     }
   }
 
@@ -68,10 +68,9 @@ export function createAIClient({ url = serverUrl(), WebSocketImpl = window.WebSo
     socket.addEventListener('message', (event) => {
       let message;
       try { message = JSON.parse(event.data); } catch { return; }
-      // The same server also broadcasts hand input; only AI and Explore messages are for this client.
-      if (message?.version !== 1 || typeof message.type !== 'string') return;
-      if (!message.type.startsWith('ai.') && !message.type.startsWith('explore.')) return;
-      deliver(message);
+      // The same server also broadcasts hand input; only replies to this client's requests matter here.
+      if (message?.version !== 1 || typeof message.request_id !== 'string') return;
+      finish(message.request_id, message);
     });
     socket.addEventListener('close', () => {
       socket = null;
@@ -81,10 +80,25 @@ export function createAIClient({ url = serverUrl(), WebSocketImpl = window.WebSo
     });
   }
 
-  function send(message) {
-    if (status !== 'open' || !socket) return false;
-    socket.send(JSON.stringify({ version: 1, ...message }));
-    return true;
+  function newRequestId(windowId) {
+    counter += 1;
+    return `${windowId}-${counter}-${Math.random().toString(36).slice(2, 7)}`;
+  }
+
+  // Sends one request and resolves with its reply (ok or not); never rejects.
+  function call(type, windowId, fields, { requestId = newRequestId(windowId), timeout = timeoutMs } = {}) {
+    const replyType = REPLY_TYPES[type];
+    const promise = new Promise((resolve) => {
+      const timer = setTimeout(() => finish(requestId, failure(replyType, windowId, requestId, 'timeout',
+        'No answer from the AI service in time.')), timeout);
+      pending.set(requestId, { windowId, replyType, resolve, timer });
+    });
+    const sent = status === 'open' && socket
+      && (socket.send(JSON.stringify({ version: 1, type, window_id: windowId, request_id: requestId, ...fields })), true);
+    if (!sent) {
+      finish(requestId, failure(replyType, windowId, requestId, 'offline', 'The AI service is not connected. Start src/main.py.'));
+    }
+    return { requestId, promise };
   }
 
   connect();
@@ -92,33 +106,18 @@ export function createAIClient({ url = serverUrl(), WebSocketImpl = window.WebSo
   return {
     get status() { return status; },
     onStatus(fn) { statusListeners.add(fn); return () => statusListeners.delete(fn); },
-    subscribe(windowId, fn) {
-      if (!listeners.has(windowId)) listeners.set(windowId, new Set());
-      listeners.get(windowId).add(fn);
-      return () => listeners.get(windowId)?.delete(fn);
+    newRequestId,
+    // Gemini request: task 'ask' or 'describe'. Resolves with the ai.response.
+    request(windowId, fields, requestId) {
+      return call('ai.request', windowId, fields, { requestId });
     },
-    newRequestId(windowId) {
-      counter += 1;
-      return `${windowId}-${counter}-${Math.random().toString(36).slice(2, 7)}`;
+    // One full camera photo of the desk. Resolves with an ai.capture.
+    snapshot(windowId) {
+      return call('ai.snapshot', windowId, {}, { timeout: SNAPSHOT_TIMEOUT_MS });
     },
-    // Sends an explore.* control message; returns false when offline.
-    control(type, windowId, fields = {}) {
-      return send({ type, window_id: windowId, ...fields });
-    },
-    // Sends an ai.request and resolves with its ai.response (ok or not); never rejects.
-    request(windowId, fields, requestId = this.newRequestId(windowId)) {
-      const promise = new Promise((resolve) => {
-        const timer = setTimeout(() => finish(requestId, {
-          version: 1, type: 'ai.response', window_id: windowId, request_id: requestId, ok: false,
-          error: { code: 'timeout', message: 'No answer from the AI service in time.' },
-        }), timeoutMs);
-        pending.set(requestId, { windowId, resolve, timer });
-      });
-      if (!send({ type: 'ai.request', window_id: windowId, request_id: requestId, ...fields })) {
-        finish(requestId, { version: 1, type: 'ai.response', window_id: windowId, request_id: requestId, ok: false,
-          error: { code: 'offline', message: 'The AI service is not connected. Start src/main.py.' } });
-      }
-      return { requestId, promise };
+    // Part of a stored photo, box in image-normalized coordinates. Resolves with an ai.capture.
+    crop(windowId, captureId, box) {
+      return call('ai.crop', windowId, { capture_id: captureId, box });
     },
     // Stops waiting for a request, for example when its window closes or a newer one replaces it.
     forget(requestId) {

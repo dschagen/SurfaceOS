@@ -1,7 +1,7 @@
 import unittest
 
 from helpers import make_hand
-from gestures.gesture_detector import PEACE_SIGN, PINCH_END, PINCH_START, THUMBS_DOWN, GestureDetector
+from gestures.gesture_detector import PEACE_SIGN, PINCH_END, PINCH_START, THUMBS_DOWN, THUMBS_UP, GestureDetector
 from gestures.hand_pose import is_pointing
 from gestures.static_gestures import StaticGestureFilter
 from vision.hand_identity import HandIdentifier
@@ -85,6 +85,31 @@ class GestureDetectorTests(unittest.TestCase):
         self.assertTrue(all(a <= b for a, b in zip(building, building[1:])))  # fills up
         self.assertGreater(max(progress), 0.8)
         self.assertEqual(progress[-1], 0.0)  # cleared after firing
+
+    def test_thumbs_up_fires_once_per_hold_and_rearms_after_lowering(self):
+        detector = GestureDetector(SETTINGS)
+        fired_at = []
+        poses = ["Thumb_Up"] * 30 + ["None"] * 5 + ["Thumb_Up"] * 20
+        for frame, pose in enumerate(poses):
+            now = frame * 0.05
+            _, events = detector.update([make_hand(gesture=pose, score=0.9)], now=now)
+            if THUMBS_UP in types(events):
+                fired_at.append(now)
+        # Stable after 3 frames, held 0.5 s: once in the first hold, once again after lowering the thumb.
+        self.assertEqual(len(fired_at), 2)
+        self.assertAlmostEqual(fired_at[0], 0.6, places=5)
+        self.assertAlmostEqual(fired_at[1], (35 + 2) * 0.05 + 0.5, places=5)
+
+    def test_thumbs_up_released_early_does_not_fire(self):
+        detector = GestureDetector(SETTINGS)
+        found = []
+        for frame in range(8):
+            _, events = detector.update([make_hand(gesture="Thumb_Up", score=0.9)], now=frame * 0.05)
+            found += types(events)
+        for frame in range(8, 30):
+            _, events = detector.update([make_hand(gesture="Open_Palm", score=0.9)], now=frame * 0.05)
+            found += types(events)
+        self.assertNotIn(THUMBS_UP, found)
 
     def test_switching_pose_restarts_hold(self):
         detector = GestureDetector(SETTINGS)

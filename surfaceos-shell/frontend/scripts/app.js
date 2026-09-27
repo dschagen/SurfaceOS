@@ -18,6 +18,10 @@ const EDIT_MODES=['move-ready','moving','resize-ready','resizing','resizing-hand
 // scrolls at SCROLL_GAIN times the finger's movement.
 const PICKER_STEP=.08,SCROLL_GAIN=.5;
 let pickerScroll={id:null,travel:0};
+// Ask AI after a thumbs-up: {stage:'prompt'|'capturing'|'placing', mode:'voice'|'screenshot', capture, token}.
+let assist=null,assistToken=0;
+// Wait for the blanked projection to reach the camera before asking the tracker for a photo.
+const CAPTURE_SETTLE_MS=150;
 // Surface numbers are never reused after a close. Hand alignment covers surfaces from alignStart on.
 let nextSurface=1, alignStart=0;
 const HOLD_S=DWELL_MS/1000;
@@ -46,6 +50,9 @@ const otherWindows=id=>windows.filter(w=>w.surface_id===id);
 const nextFrame=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
 function rectStyle(el,r){Object.assign(el.style,{left:`${r.x*100}%`,top:`${r.y*100}%`,width:`${r.width*100}%`,height:`${r.height*100}%`});}
 function prompt(title,description,choices){
+  // Another dialog replacing an open Ask AI prompt ends that Ask AI step.
+  if(!dialog.hidden&&dialog.dataset.owner==='ask-ai'&&assist?.stage==='prompt')assist=null;
+  delete dialog.dataset.owner;dialog.classList.remove('near-hand');dialog.style.left='';dialog.style.top='';
   dialog.replaceChildren();
   const h=document.createElement('h2');h.textContent=title;
   const p=document.createElement('p');p.textContent=description;
@@ -54,7 +61,7 @@ function prompt(title,description,choices){
   dialog.append(h,p,row);dialog.hidden=false;
   row.firstElementChild?.focus();
 }
-function closePrompt(){dialog.hidden=true;}
+function closePrompt(){dialog.hidden=true;delete dialog.dataset.owner;}
 // Raw rings show uncalibrated camera positions; calibrated rings are colored by surface number.
 function showCursor(p,surfaceNumber=null,raw=false){
   cursor.hidden=false;cursor.style.left=`${p.x*100}%`;cursor.style.top=`${p.y*100}%`;
@@ -339,7 +346,7 @@ function render(){
       }
       frame.className=`surface-window${w.id===activeId?' active':''}${w.id===hoveredHandWindowId?' hand-hover':''}`;
       frame.style.zIndex=String(windows.indexOf(w)+1);rectStyle(frame,w);
-      frame.querySelector('.window-header').textContent=w.content==='picker'?'Select a program':w.content==='ai'?'Ask AI':w.content==='screenshot'?'Screenshot':renderer?.apps?.find(a=>a.type===w.content)?.title||w.content;
+      frame.querySelector('.window-header').textContent=w.content==='picker'?'Select a program':w.content==='screenshot'?'Screenshot':renderer?.apps?.find(a=>a.type===w.content)?.title||w.content;
       frame.querySelectorAll('.resize-corner').forEach(handle=>handle.remove());
       if(mode==='resize-ready'&&selectedId===w.id) for(const key of ['nw','ne','se','sw']){
         const handle=document.createElement('span');handle.className=`resize-corner ${key}`;handle.dataset.resize=key;frame.append(handle);
@@ -374,28 +381,15 @@ function renderContent(w,host){
   if(w.content==='screenshot'){
     const image=document.createElement('img');image.className='screenshot-image';image.alt='Captured image';image.src=w.image;host.append(image);return;
   }
-  if(w.content==='ai'){
-    const panel=document.createElement('div');panel.className='ai-panel';
-    const title=document.createElement('strong');title.textContent='Ask AI';
-    const message=document.createElement('p');message.textContent=w.message||'Enter a question or capture a physical area. A model connection is needed for an answer.';
-    const input=document.createElement('textarea');input.placeholder='Write a question';input.value=w.question||'';input.addEventListener('input',()=>{w.question=input.value;});
-    const row=document.createElement('div');row.className='ai-controls';
-    const mic=document.createElement('button');mic.textContent='Microphone';mic.addEventListener('click',()=>startVoice(w.id));
-    const camera=document.createElement('button');camera.textContent='Camera';camera.addEventListener('click',()=>startAICamera(w.id));
-    const send=document.createElement('button');send.textContent='Send';send.addEventListener('click',()=>{w.message='No AI service is connected. Your question is kept in this window.';message.textContent=w.message;});
-    row.append(mic,camera,send);panel.append(title,message);
-    if(w.image){const preview=document.createElement('img');preview.src=w.image;preview.alt='Attached physical area';preview.className='ai-preview';panel.append(preview);}
-    panel.append(input,row);host.append(panel);return;
-  }
   if(renderer?.mountApp&&renderer.apps?.some(app=>app.type===w.content)){
-    renderer.mountApp({id:w.id,content:w.content},host,()=>{});return;
+    renderer.mountApp({id:w.id,content:w.content,launch:w.launch},host,()=>{});return;
   }
   const fallback=document.createElement('p');fallback.textContent='This program is unavailable.';host.append(fallback);
 }
 function cyclePicker(id,delta){const w=windowById(id);if(!w||w.content!=='picker')return;
   const count=1+(renderer?.apps?.length||0);w.pickerIndex=(w.pickerIndex+delta+count)%count;render();}
 function selectProgram(id){const w=windowById(id);if(!w||w.content!=='picker')return;
-  const list=[{type:'notes'},...(renderer?.apps||[])];w.content=list[w.pickerIndex||0].type;activeId=w.id;render();status(`${w.content} opened`);}
+  const list=[{type:'notes',title:'Notes'},...(renderer?.apps||[])],chosen=list[w.pickerIndex||0];w.content=chosen.type;activeId=w.id;render();status(`${chosen.title} opened`);}
 function openActions(){if(phase!=='workspace')return;cancel();actions.hidden=false;status('Choose Make Window, Screenshot, or New Surface');}
 function chooseAction(type){
   if(phase!=='workspace')return;
@@ -409,9 +403,9 @@ function chooseAction(type){
 }
 function arm(type){action=type;mode='armed';interaction=null;actions.hidden=true;outline.hidden=true;
   const how='Pinch and drag with one hand, or pinch with both hands and spread them';
-  status(type==='physical'?`${how}, to mark the area to capture`:`${how}, to draw ${type==='new'?'the window':type==='ai'?'the Ask AI window':'the screenshot window'} on one surface`);
+  status(type==='physical'?`${how}, to mark the area to capture`:`${how}, to draw ${type==='new'?'the window':type==='assistant'?'where the Ask AI chat goes':'the screenshot window'} on one surface`);
 }
-function cancel(){if(phase!=='workspace')return;mode='idle';action=null;interaction=null;operation=null;selectedId=null;destinationId=null;outline.hidden=true;labels.hidden=true;closePrompt();render();}
+function cancel(){if(phase!=='workspace')return;assist=null;mode='idle';action=null;interaction=null;operation=null;selectedId=null;destinationId=null;outline.hidden=true;labels.hidden=true;closePrompt();render();}
 function showOutline(r){outline.hidden=false;rectStyle(outline,r);}
 function candidate(r,allowOverlap=false){
   const corners=[{x:r.x,y:r.y},{x:r.x+r.width,y:r.y},{x:r.x+r.width,y:r.y+r.height},{x:r.x,y:r.y+r.height}];
@@ -421,16 +415,75 @@ function candidate(r,allowOverlap=false){
   if(!validRect(bounds,allowOverlap?[]:otherWindows(s.id)))return null;
   return {s,bounds};
 }
-function completeDrawing(r){outline.hidden=true;const chosen=candidate(r,action==='physical'||action==='ai-camera');
+function completeDrawing(r){outline.hidden=true;const chosen=candidate(r,action==='physical');
   if(!chosen){mode='armed';status('Place a larger rectangle entirely within one surface, clear of other windows. Try again.');return;}
   if(action==='capture-window'){mode='idle';action=null;captureWindow(chosen.s,chosen.bounds);return;}
-  if(action==='ai-camera'){mode='idle';action=null;capturePhysical(chosen.s,chosen.bounds,sourceId);return;}
+  if(action==='assistant'){openAssistantWindow(chosen.s,chosen.bounds);return;}
   if(action==='physical'){mode='idle';capturePhysical(chosen.s,chosen.bounds);return;}
   if(action==='place-image'){
     addScreenshot(chosen.s,chosen.bounds,pendingImage);pendingImage=null;return;
   }
-  const w={id:`window-${nextId++}`,surface_id:chosen.s.id,...chosen.bounds,content:action==='new'?'picker':'ai',pickerIndex:0,note:''};
-  windows.push(w);activeId=w.id;mode='idle';action=null;render();status(w.content==='picker'?'Scroll the program list, then pinch or click to confirm':'Ask AI window opened');
+  const w={id:`window-${nextId++}`,surface_id:chosen.s.id,...chosen.bounds,content:'picker',pickerIndex:0,note:''};
+  windows.push(w);activeId=w.id;mode='idle';action=null;render();status('Scroll the program list, then pinch or click to confirm');
+}
+// ---- Ask AI: thumbs-up, Voice or Screenshot, then draw where the chat goes ----
+function askAIBlocked(){return phase!=='workspace'||!!assist||['armed','drawing','moving','resizing'].includes(mode)||!!renderer?.flowActive?.();}
+function openAskAI(point){
+  if(askAIBlocked())return false;
+  cancel();actions.hidden=true;
+  assist={stage:'prompt',token:++assistToken};
+  prompt('Ask AI','Talk with Gemini, or take a photo of the desk to ask about.',[
+    ['Voice',()=>chooseAssist('voice')],['Screenshot',()=>chooseAssist('screenshot')],['Cancel',()=>cancelAssist()]]);
+  dialog.dataset.owner='ask-ai';
+  if(point)placeDialogNear(point);
+  status('Ask AI: choose Voice or Screenshot. Thumbs down cancels.');
+  return true;
+}
+// Keeps the prompt next to the hand but fully on screen, above the hand when there is room.
+function placeDialogNear(p){
+  const W=stage.clientWidth,H=stage.clientHeight,w=dialog.offsetWidth,h=dialog.offsetHeight,gap=24;
+  const above=p.y*H-h-gap;
+  dialog.classList.add('near-hand');
+  dialog.style.left=`${clamp(p.x*W-w/2,8,Math.max(8,W-w-8))}px`;
+  dialog.style.top=`${clamp(above>=8?above:p.y*H+gap,8,Math.max(8,H-h-8))}px`;
+}
+async function chooseAssist(kind){
+  if(!assist||assist.stage!=='prompt')return;
+  assist.mode=kind;
+  if(kind==='voice'){assist.stage='placing';arm('assistant');return;}
+  // The photo is taken now, so it shows the desk as it was when Screenshot was chosen.
+  assist.stage='capturing';status('Taking a photo of the desk');
+  const token=assist.token,reply=await captureDesk('surfaceos-shell');
+  if(assist?.token!==token)return;
+  if(!reply?.ok){
+    assist=null;
+    prompt('Photo unavailable',reply?.error?.message||'The desk photo could not be taken.',[
+      ['Try again',()=>{assist={stage:'prompt',token:++assistToken};chooseAssist('screenshot');}],['Cancel',cancel]]);
+    status('Ask AI photo failed');return;
+  }
+  assist.capture=reply;assist.stage='placing';arm('assistant');
+}
+function cancelAssist(){if(!assist)return false;cancel();status('Ask AI canceled');return true;}
+function openAssistantWindow(s,bounds){
+  const launch=assist?{mode:assist.mode,capture:assist.capture}:{mode:'voice'};
+  const w={id:`window-${nextId++}`,surface_id:s.id,...bounds,content:'assistant',launch};
+  windows.push(w);activeId=w.id;mode='idle';action=null;assist=null;render();
+  status(launch.mode==='screenshot'?'Drag a box over the part of the photo to ask about':'Ask AI is listening');
+}
+// Blanks the projection, then asks the tracker for one camera photo of the desk.
+async function captureDesk(windowId){
+  if(!renderer?.snapshot)return {ok:false,error:{code:'unavailable',message:'The Ask AI service is not loaded. Reload the page.'}};
+  stage.classList.add('ai-capture');
+  try{
+    await nextFrame();await new Promise(resolve=>setTimeout(resolve,CAPTURE_SETTLE_MS));
+    return await renderer.snapshot(windowId);
+  }finally{stage.classList.remove('ai-capture');}
+}
+function closeWindow(id){
+  if(!windowById(id))return;
+  windows=windows.filter(item=>item.id!==id);
+  if(activeId===id)activeId=windows.at(-1)?.id||null;
+  render();status('Window closed');
 }
 function confirm(title,description,yes){prompt(title,description,[['Yes',yes],['No',()=>{cancel();status('Canceled');}]]);}
 // Each gesture (or footer button) asks Yes/No once, then opens its menu; the menu choice picks a target.
@@ -532,6 +585,10 @@ function handClick(e,target){
 function handleInput(raw,target=null){
   if(raw?.version!==1||typeof raw.type!=='string')return false;
   if(raw.type==='hold_progress'){cursor.style.setProperty('--hold',String(clamp(Number(raw.progress)||0,0,1)));return true;}
+  // From the moment a pinch hold completes until the fingers open, the ring stays full and glows:
+  // nothing is clicked yet, and releasing clicks wherever the ring is then.
+  if(raw.source==='hand'&&raw.type==='pointer_down')cursor.classList.add('armed');
+  if(raw.source==='hand'&&(raw.type==='pointer_up'||raw.type==='pointer_cancel'))cursor.classList.remove('armed');
   if(raw.type==='calibration_result'){handleCalibrationResult(raw);return true;}
   if(phase==='markers'||phase==='marker-failed')return true;
   if(phase==='finger'||phase==='camera-check'){
@@ -564,9 +621,19 @@ function handleInput(raw,target=null){
   }
   // A gesture menu never interrupts drawing, moving, or resizing.
   const busy=['armed','drawing',...EDIT_MODES].includes(mode);
+  if(raw.type==='thumbs_up'){
+    const point=Number.isFinite(raw.x)&&Number.isFinite(raw.y)?pointForEvent(raw)||offSurfacePoint(raw):null;
+    return openAskAI(point);
+  }
+  if(raw.type==='thumbs_down'){
+    if(cancelAssist())return true;
+    if(activeId&&renderer?.cancelFlow?.(activeId)){status('Ask AI canceled');return true;}
+    if(busy)return false;askClose();return true;
+  }
+  // Other gesture menus wait until an Ask AI step is finished or cancelled.
+  if(assist&&(raw.type==='two_hand_hold'||raw.type==='peace_sign'))return false;
   if(raw.type==='two_hand_hold'){if(busy)return false;askMainMenu();return true;}
   if(raw.type==='peace_sign'){if(busy)return false;askManage();return true;}
-  if(raw.type==='thumbs_down'){if(busy)return false;askClose();return true;}
   if(raw.type==='scroll'){
     const point=pointForEvent(raw);if(!point)return false;
     const frame=at(point)?.closest('.surface-window'),w=windowById(frame?.dataset.windowId);
@@ -699,7 +766,7 @@ async function captureWindow(s,bounds){
   try{const image=await imageOfElement(host);addScreenshot(s,bounds,image);}
   catch(error){status(`Digital capture could not render this content: ${error.message}`);prompt('Capture unavailable','Try a different window or use a physical area capture.',[['OK',openActions]]);}
 }
-async function capturePhysical(s,bounds,intoId=null){
+async function capturePhysical(s,bounds){
   if(!s.camera){status('Align hand/camera points before capturing a specific physical area.');
     prompt('Camera alignment needed','The projector boundary alone cannot tell the camera which pixels belong to this area. Recalibrate with hand alignment, then capture.',[['OK',openActions]]);return;}
   if(!navigator.mediaDevices?.getUserMedia){status('Camera access is unavailable on this browser or origin.');return;}
@@ -727,24 +794,9 @@ async function capturePhysical(s,bounds,intoId=null){
     }
     context.putImageData(output,0,0);
     const image=crop.toDataURL('image/png');
-    if(intoId){const w=windowById(intoId);if(w){w.image=image;w.message='Photo attached locally. No AI service is connected yet.';render();status('Physical area attached to Ask AI');}}
-    else placeCapturedImage(s,bounds,image);
+    placeCapturedImage(s,bounds,image);
   }catch(error){status(`Camera capture unavailable: ${error.message}`);prompt('Camera capture unavailable',error.message,[['OK',openActions]]);}
   finally{surfacesLayer.style.visibility='';actions.style.visibility='';stage.classList.remove('capture-dark');stream?.getTracks().forEach(track=>track.stop());}
-}
-function startAICamera(id){
-  confirm('Capture a physical area?','Draw the region on a calibrated surface. The image will be attached to this Ask AI window.',()=>{
-    sourceId=id;arm('ai-camera');
-  });
-}
-function startVoice(id){
-  const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;
-  const w=windowById(id);
-  if(!Recognition){if(w){w.message='Voice input is unavailable in this browser. Type your question instead.';render();}return;}
-  const recognition=new Recognition();recognition.lang='en-US';recognition.interimResults=false;
-  recognition.onresult=e=>{const current=windowById(id);if(current){current.question=e.results[0][0].transcript;current.message='Question transcribed. No AI service is connected yet.';render();}};
-  recognition.onerror=e=>{const current=windowById(id);if(current){current.message=`Microphone unavailable: ${e.error}`;render();}};
-  try{recognition.start();if(w){w.message='Listening…';render();}}catch(error){if(w){w.message=`Microphone unavailable: ${error.message}`;render();}}
 }
 $('confirm-surface').addEventListener('click',confirmSurface);
 $('accept-alignment').addEventListener('click',acceptCameraAlignment);
@@ -806,7 +858,11 @@ stage.addEventListener('pointerup',e=>{
 });
 stage.addEventListener('pointercancel',e=>handleInput({version:1,type:'pointer_cancel',source:'mouse'}));
 document.addEventListener('keydown',e=>{
-  if(e.key==='Escape'){if(EDIT_MODES.includes(mode))finishEdit(false);else cancel();return;}
+  if(e.key==='Escape'){
+    if(EDIT_MODES.includes(mode)){finishEdit(false);return;}
+    if(!assist&&activeId&&renderer?.cancelFlow?.(activeId))return;
+    cancel();return;
+  }
   if(e.target.matches('textarea,input,[contenteditable]')||e.ctrlKey||e.metaKey||e.altKey)return;
   if(e.key.toLowerCase()==='f')$('fullscreen').click();
   if(phase==='workspace'&&e.key.toLowerCase()==='n')chooseAction('new');
@@ -817,7 +873,9 @@ window.addEventListener('resize',()=>{keepSetupVisible();render();});
 window.SurfaceOS=Object.freeze({
   dispatchInput:event=>handleInput(event),
   mountWidgetRenderer(value){if(!value||typeof value.renderLayout!=='function')throw new TypeError('Expected renderer');renderer=value;render();},
-  getState:()=>({phase,mode,surfaces:structuredClone(surfaces),windows:structuredClone(windows)}),
-  reset:()=>{if(cameraStep)clearTimeout(cameraStep.timer);cameraStep=null;markerToken++;stage.classList.remove('marker-capture');cursor.hidden=true;surfaces=[];windows=[];nextId=1;nextSurface=1;alignStart=0;activeId=null;hoveredHandWindowId=null;mode='idle';action=null;interaction=null;pendingImage=null;setupDrag=null;setup.classList.remove('is-moved');setup.style.left='';setup.style.top='';draft=[[.11,.22],[.89,.22],[.89,.83],[.11,.83]];showCalibration();},
+  getState:()=>({phase,mode,assist:assist?.stage??null,surfaces:structuredClone(surfaces),windows:structuredClone(windows)}),
+  captureDesk:windowId=>captureDesk(windowId),
+  closeWindow:id=>closeWindow(id),
+  reset:()=>{if(cameraStep)clearTimeout(cameraStep.timer);cameraStep=null;markerToken++;stage.classList.remove('marker-capture');cursor.hidden=true;surfaces=[];windows=[];nextId=1;nextSurface=1;alignStart=0;activeId=null;hoveredHandWindowId=null;mode='idle';action=null;interaction=null;pendingImage=null;setupDrag=null;assist=null;setup.classList.remove('is-moved');setup.style.left='';setup.style.top='';draft=[[.11,.22],[.89,.22],[.89,.83],[.11,.83]];showCalibration();},
 });
 showCalibration();

@@ -10,6 +10,8 @@ POINTER_UP = "pointer_up"
 POINTER_CANCEL = "pointer_cancel"
 SCROLL = "scroll"
 THUMBS_DOWN = "thumbs_down"
+# Opens Ask AI in the shell.
+THUMBS_UP = "thumbs_up"
 PEACE_SIGN = "peace_sign"
 # Progress of whichever gesture hold is building up, so the cursor can fill.
 HOLD_PROGRESS = "hold_progress"

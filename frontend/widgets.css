@@ -41,7 +41,7 @@
 .surfaceos-app-music { --sw-accent: #ff6fb1; }
 .surfaceos-app-weather { --sw-accent: #62b6ff; }
 .surfaceos-app-youtube { --sw-accent: #ff4e45; }
-.surfaceos-app-explore { --sw-accent: #7ee0a1; }
+.surfaceos-app-assistant { --sw-accent: #8ab4ff; }
 
 /* ---------- Base widgets ---------- */
 
@@ -216,6 +216,14 @@
   border-radius: 0.9em; box-shadow: 0 0.4em 1.4em rgba(0, 0, 0, 0.35);
 }
 .surfaceos-widgets .surfaceos-v-art .surfaceos-icon { width: 55%; height: 55%; stroke-width: 1.6; opacity: 0.85; }
+
+/* ---------- Ask AI ---------- */
+
+/* The part of the desk photo being selected; pointer input passes through to the app. */
+.surfaceos-widgets .surfaceos-v-crop-box {
+  padding: 0; pointer-events: none; border: 2px dashed var(--sw-accent); border-radius: 4px;
+  background: color-mix(in srgb, var(--sw-accent) 16%, transparent);
+}
 
 /* ---------- YouTube ---------- */
 

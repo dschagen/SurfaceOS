@@ -3,10 +3,11 @@ import time
 from calibration.coordinate_mapper import CoordinateMapper
 from gestures.gesture_detector import PEACE_SIGN as GESTURE_PEACE_SIGN
 from gestures.gesture_detector import THUMBS_DOWN as GESTURE_THUMBS_DOWN
+from gestures.gesture_detector import THUMBS_UP as GESTURE_THUMBS_UP
 from gestures.gesture_detector import GestureEvent, GestureState
 from gestures.two_hand import TwoHandEvent, TwoHandPinch
 from input.events import (HOLD_PROGRESS, PEACE_SIGN, POINTER_CANCEL, POINTER_DOWN, POINTER_MOVE,
-                          POINTER_UP, SCROLL, THUMBS_DOWN, Pointer, SurfaceInputEvent)
+                          POINTER_UP, SCROLL, THUMBS_DOWN, THUMBS_UP, Pointer, SurfaceInputEvent)
 from utils.geometry import Point
 from vision.hand_data import HandData
 
@@ -15,7 +16,7 @@ MIN_SCROLL_DY = 0.002
 # A finger slowing below this fraction of its flick speed counts as the end of a flick.
 FLICK_STOP_FRACTION = 0.3
 # Held poses and the contract events they produce.
-POSE_EVENTS = {GESTURE_THUMBS_DOWN: THUMBS_DOWN, GESTURE_PEACE_SIGN: PEACE_SIGN}
+POSE_EVENTS = {GESTURE_THUMBS_DOWN: THUMBS_DOWN, GESTURE_THUMBS_UP: THUMBS_UP, GESTURE_PEACE_SIGN: PEACE_SIGN}
 
 
 class _ScrollState:

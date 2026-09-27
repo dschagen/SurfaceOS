@@ -17,6 +17,8 @@ New-Item -ItemType Directory -Force models | Out-Null
 Invoke-WebRequest https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/latest/gesture_recognizer.task -OutFile models\gesture_recognizer.task
 ```
 
+For Ask AI, copy `.env.example` to `.env` and replace the placeholder with your Gemini API key. The tracker reads `.env` when it starts. Keep the key only in `.env`, which Git ignores; never put it in `.env.example`.
+
 Node.js is only needed to run the shell unit tests.
 
 ## Run

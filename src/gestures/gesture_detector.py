@@ -9,10 +9,11 @@ from vision.hand_data import HandData
 PINCH_START = "PINCH_START"
 PINCH_END = "PINCH_END"
 THUMBS_DOWN = "THUMBS_DOWN"
+THUMBS_UP = "THUMBS_UP"
 PEACE_SIGN = "PEACE_SIGN"
 
 # MediaPipe labels of poses that fire an event once held for hold_s.
-HELD_POSES = {"Thumb_Down": THUMBS_DOWN, "Victory": PEACE_SIGN}
+HELD_POSES = {"Thumb_Down": THUMBS_DOWN, "Thumb_Up": THUMBS_UP, "Victory": PEACE_SIGN}
 
 
 @dataclass
@@ -24,13 +25,13 @@ class GestureState:
     # Index finger straight, other fingers curled, and not pinching.
     is_pointing: bool
     static_gesture: str
-    # 0 to 1 while a held pose (thumbs down, peace sign) is building up to its event.
+    # 0 to 1 while a held pose (thumbs down, thumbs up, peace sign) is building up to its event.
     pose_hold_progress: float = 0.0
 
 
 @dataclass
 class GestureEvent:
-    # PINCH_START, PINCH_END, THUMBS_DOWN, or PEACE_SIGN.
+    # PINCH_START, PINCH_END, THUMBS_DOWN, THUMBS_UP, or PEACE_SIGN.
     type: str
     hand_id: int
 

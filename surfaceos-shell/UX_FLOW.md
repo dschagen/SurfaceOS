@@ -35,7 +35,7 @@ Inside the drawn window, display a scrollable program picker. The index finger s
 - **Capture physical area:** temporarily hide projected windows and controls, capture the selected real-world region with the camera, and restore the windows. Temporary hiding does not delete or reset them. Camera-to-surface calibration is required for an accurate crop. If darkness makes capture unusable, the capture step needs appropriate neutral illumination or ambient light.
 - Show the result in a new screenshot window. If the chosen result placement conflicts with existing windows, ask for another free position.
 
-The Ask AI camera action should reuse the physical-area capture path rather than inventing a second camera workflow.
+Ask AI takes its desk photo through the hand tracker, which already has the camera open, instead of opening the camera in the browser. The projection is blanked for that moment so the photo shows only the desk.
 
 ### New Surface
 
@@ -43,7 +43,7 @@ Repeat the startup surface steps for one or more additional surfaces: drag the f
 
 ### Ask AI
 
-Ask AI is not in the main menu. A thumbs-up gesture is reserved to open it once the widget teammate connects it. The Ask AI window contains an AI conversation area with a microphone action for a spoken question and a camera action to capture and send an image. Its real answer must reflect the actual voice question or selected image. Permission prompts and unavailable hardware need clear feedback.
+Ask AI is not in the main menu. A thumbs-up held 0.5 s opens a prompt next to the hand with **Voice**, **Screenshot**, and **Cancel**; thumbs-down or Esc backs out at any step. **Voice** asks where the chat goes (draw it like a window) and starts a hands-free voice chat: it listens, sends each sentence when you pause, reads Gemini's answer aloud, and shows both sides as a transcript. **Screenshot** takes a camera photo of the whole desk at that moment, then asks where the chat goes; the photo appears in the chat, you drag a box over the part to ask about, Gemini describes it in one sentence, and the same voice chat starts with that image as context. Only the newest chat listens; older ones pause and show **Listen** to take the microphone back. **Ask AI** is also in the program picker, as the mouse fallback: it offers Voice or Screenshot inside that window. A thumbs-up is ignored during setup, while drawing, moving, or resizing, and while an Ask AI prompt, placement, or crop is open.
 
 ## Gestures
 
@@ -57,12 +57,12 @@ Every activating gesture is held for 0.25 s. While a hold builds up, the cursor 
 | Peace sign | **Manage windows?** Yes/No, then **Move / Resize / Change surface**, then pinch the target window. |
 | Thumbs down | **Close something?** Yes/No, then **Window / Surface**, then pinch the target. Closing a surface asks once more, then removes it and its windows. |
 | Index finger pointing | Scroll lists or window content while held, without an approval prompt. |
-| Thumbs up | Reserved for Ask AI. |
+| Thumbs up | **Ask AI** next to the hand: **Voice / Screenshot / Cancel**. |
 
 - **Move:** drag the selected window on its surface; prevent overlap and boundary crossing.
 - **Resize:** pinch with both hands and spread them; the rectangle between the hands becomes the window's new size live, and releasing both pinches keeps it and ends Resize. The mouse can drag the four corner handles instead. Keep the window within its surface and free of overlap.
 - **Move and Resize** show **Done** and **Cancel** buttons until they end. Cancel puts the window back where it was.
-- **Hand clicks happen on release:** pinch until the ring fills, then let go; the click lands where the ring is at that moment. Drags (drawing, moving) start when the ring fills.
+- **Hand clicks happen on release:** pinch until the ring fills; the ring then stays full and glows while the pinch is held, and nothing is clicked yet. Let go over the target, and the click lands where the ring is at that moment. Drags (drawing, moving) start when the ring fills.
 - **Change surface:** show large numbered labels on the other calibrated surfaces; choose a destination, pinch a free spot there, and prevent overlap.
 
 Gesture-triggered menus ask Yes/No once before opening, except for ordinary pointing and scrolling. Choices inside a menu are direct. A one-hand pinch confirms the centered program-picker item.
