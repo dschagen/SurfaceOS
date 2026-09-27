@@ -11,7 +11,7 @@ from input.events import HOLD_PROGRESS, POINTER_MOVE, SCROLL, TWO_HAND_PINCH_MOV
 from input.interaction_state import InteractionState
 from server.protocol import PrimaryPointer, hands_debug_message, primary_messages
 from server.server import SurfaceServer
-from settings import MODEL_PATH, load_settings
+from settings import MODEL_PATH, load_env, load_settings
 from utils.timing import FpsCounter
 from vision.camera import Camera
 from vision.hand_tracker import HandTracker
@@ -20,6 +20,10 @@ from vision.preview import draw_preview
 
 def main() -> None:
     settings = load_settings()
+    # Names only; values such as the Gemini key are never printed.
+    loaded = load_env()
+    if loaded:
+        print(f"Loaded from .env: {', '.join(loaded)}")
 
     camera = Camera(settings["camera"]["index"], settings["camera"]["width"],
                     settings["camera"]["height"], settings["camera"].get("fps"))

@@ -114,7 +114,7 @@ class GeminiService:
         if self._client is not None:
             return None
         if not self._environ.get("GEMINI_API_KEY"):
-            return "Gemini is not configured. Set GEMINI_API_KEY before starting src/main.py."
+            return "Gemini is not configured. Put GEMINI_API_KEY=your-key in .env at the repository root, then restart src/main.py."
         try:
             import google.genai  # noqa: F401
         except ImportError:

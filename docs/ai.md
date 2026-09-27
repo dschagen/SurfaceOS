@@ -9,9 +9,11 @@ browser never sees the API key. Messages travel over the same WebSocket server a
 ## Setup
 
 1. Install dependencies: `.venv\Scripts\python -m pip install -r requirements.txt` (adds `google-genai`).
-2. Put the key in `.env` at the repository root (git-ignored; `.env.example` shows the format) and
-   start the tracker with `.\start_tracker.ps1`, which loads it for that run only. Or set it in the
-   terminal yourself: PowerShell `$env:GEMINI_API_KEY = "..."`. Never put the key in a committed file.
+2. Copy `.env.example` to `.env` at the repository root and put the key there
+   (`GEMINI_API_KEY=your-key`). `.env` is git-ignored; `.env.example` is committed, so it must only ever
+   hold the placeholder. `python src/main.py` and `tools/gemini_check.py` read `.env` at startup
+   (`load_env` in `src/settings.py`); `.\start_tracker.ps1` also works. A value already set in the terminal,
+   such as PowerShell `$env:GEMINI_API_KEY = "..."`, takes priority. Never put the key in a committed file.
 3. Model: `ai.model` in `config/settings.json` (default `gemini-3.8-flash`), or override with the
    `GEMINI_MODEL` environment variable. `ai.timeout_s` limits each request (default 30).
 
