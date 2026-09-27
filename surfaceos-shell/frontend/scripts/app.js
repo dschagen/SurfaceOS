@@ -519,6 +519,10 @@ function handClick(e,target){
 function handleInput(raw,target=null){
   if(raw?.version!==1||typeof raw.type!=='string')return false;
   if(raw.type==='hold_progress'){cursor.style.setProperty('--hold',String(clamp(Number(raw.progress)||0,0,1)));return true;}
+  // From the moment a pinch hold completes until the fingers open, the ring stays full and glows:
+  // nothing is clicked yet, and releasing clicks wherever the ring is then.
+  if(raw.source==='hand'&&raw.type==='pointer_down')cursor.classList.add('armed');
+  if(raw.source==='hand'&&(raw.type==='pointer_up'||raw.type==='pointer_cancel'))cursor.classList.remove('armed');
   if(raw.type==='calibration_result'){handleCalibrationResult(raw);return true;}
   if(phase==='markers'||phase==='marker-failed')return true;
   if(phase==='finger'||phase==='camera-check'){
