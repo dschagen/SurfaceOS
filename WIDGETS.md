@@ -17,7 +17,7 @@ How the pieces connect:
 - Hand pointers reach window content through the shell's `surfaceos:window-pointer` event. Mouse pointers are read by the adapter from native pointer events on the window content. Both arrive as contract v1 events in window-local coordinates.
 - The shell rebuilds window frames on each render, so the adapter keeps each window's content in a persistent element and moves it into the new frame. App state, canvases, and videos survive moves, focus changes, and lost tracking.
 
-`python tools/integration_smoke.py` runs the whole flow in headless Edge or Chrome: mouse window creation, a calculator computation, a second window through the Workspace layout contract, then a hand-created window through the real WebSocket server, a hand pinch on a widget, and a lost-tracking cancel.
+`python tools/integration_smoke.py` runs the whole flow in headless Edge or Chrome: mouse window creation, a calculator computation, a second window through the Workspace layout contract, then a hand-created window through the real WebSocket server, a hand pinch on a widget, and a lost-tracking cancel. `python tools/youtube_smoke.py` tests the YouTube app against the real YouTube player (needs internet).
 
 ## Standalone pages
 
@@ -42,6 +42,7 @@ For the music app, also run `python tools/media_bridge.py` (standard library onl
 | `chess` | Chess | Full rules (castling, en passant, promotion to queen, check, mate, stalemate). A setup screen offers 2 players or the computer at Easy, Medium, or Hard. The computer searches in a Web Worker (`apps/chess-worker.js`) so the UI stays responsive; Hard thinks for up to about 2 seconds. |
 | `music` | Music | Controls whatever plays on the laptop (Spotify, a YouTube tab) with the system media keys, and shows the current track. Needs `tools/media_bridge.py`. |
 | `weather` | Weather | Live Open-Meteo forecast for Miami (FIU), no API key, needs internet. |
+| `youtube` | YouTube | Plays a video with YouTube's official IFrame Player API (no API key, needs internet). SurfaceOS buttons for play/pause, restart, volume, and mute; a pinch or click on the video toggles playback; **Next demo** cycles built-in videos. Paste a youtube.com or youtu.be link or an 11-character video ID into the field and press Enter or **Load**. The embedded player ignores pointer input, so hand and mouse both go through SurfaceOS controls. If the browser blocks sound (no mouse click on the page yet), it plays muted and says so. |
 
 Todo, notepad, and calendar get text from speech-to-text. The default uses the browser's speech recognition (Chrome or Edge, internet, microphone permission granted once for `localhost`). A physical keyboard also works in the focused window. Another STT engine can replace it (see below).
 
@@ -84,6 +85,8 @@ A button activates only if pressed and released over the same button. A canceled
 Additions to the v1 layout contract, all optional and backward compatible:
 
 - Widget types `canvas` and `video`. App code reaches their elements through `getElement(id)` to draw or attach a stream; layout data still carries no code.
+- Widget type `embed`: an empty container that app code fills (the YouTube player). The renderer never moves an existing element, because moving an iframe reloads it; stacking follows layout order through `z-index`.
+- Widget type `input`: a native one-line text field with optional `value` and `placeholder`. It emits `{ event: "change", value }` on every edit and `{ event: "submit", value }` on Enter. A re-render only replaces the text when the layout's `value` changes, so typing is never overwritten. Hand input cannot type; keep a button path for anything essential.
 - `variant`: a string or list of style tokens (`[a-z0-9-]`), applied only as `surfaceos-v-*` class names.
 - `disabled: true` on a button: drawn dimmed and never activates.
 - `icon`: the name of a built-in line icon from `icons.js` (for example `play`, `mic`, `trash`, `sun`), drawn before the text or alone. Unknown names are skipped with a warning; layout data never carries SVG.

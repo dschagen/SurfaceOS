@@ -23,6 +23,37 @@
   import { describeWeather } from "./apps/weather.js";
   import { monthCells, dateKey } from "./apps/calendar.js";
   import { createPongGame, stepPong } from "./apps/pong.js";
+  import { parseYouTubeInput, parseStartTime, formatTime, DEMO_VIDEOS } from "./apps/youtube.js";
+
+  // Stand-in for YouTube's IFrame Player API so these tests never touch the network.
+  // It records the API calls each SurfaceOS control makes and reports player states back.
+  class FakePlayer {
+    static instances = [];
+    static blockPlay = false;
+    constructor(mount, options) {
+      this.options = options;
+      this.calls = [];
+      this.state = -1;
+      this.iframe = document.createElement("iframe");
+      mount.replaceWith(this.iframe);
+      FakePlayer.instances.push(this);
+      setTimeout(() => { options.events.onReady({ target: this }); this.setState(5); }, 0);
+    }
+    setState(state) { this.state = state; this.options.events.onStateChange({ data: state, target: this }); }
+    fail(code) { this.options.events.onError({ data: code, target: this }); }
+    playVideo() { this.calls.push("play"); if (!FakePlayer.blockPlay) this.setState(1); }
+    pauseVideo() { this.calls.push("pause"); this.setState(2); }
+    seekTo(seconds) { this.calls.push(`seek:${seconds}`); }
+    loadVideoById({ videoId, startSeconds }) { this.calls.push(`load:${videoId}:${startSeconds}`); }
+    setVolume(volume) { this.calls.push(`volume:${volume}`); }
+    mute() { this.calls.push("mute"); }
+    unMute() { this.calls.push("unmute"); }
+    getCurrentTime() { return 12; }
+    getDuration() { return 60; }
+    getVideoData() { return { title: "Fake video" }; }
+    destroy() { this.destroyed = true; }
+  }
+  window.YT = { Player: FakePlayer };
 
   const results = document.getElementById("results");
   let failures = 0;
@@ -271,6 +302,105 @@
     game.left.y = game.left.target = 0.9;
     for (let i = 0; i < 20; i += 1) stepPong(game, 0.02, { ai: true });
     assertEqual(game.right.score, 1);
+  });
+
+  // ---- YouTube ----
+
+  await test("YouTube links and IDs are parsed, other text is rejected", () => {
+    const id = "aqz-KE-bpKQ";
+    const cases = {
+      [id]: { id, start: 0 },
+      [`https://www.youtube.com/watch?v=${id}`]: { id, start: 0 },
+      [`youtube.com/watch?v=${id}&t=1m30s`]: { id, start: 90 },
+      [`https://youtu.be/${id}?t=42`]: { id, start: 42 },
+      [`https://m.youtube.com/shorts/${id}`]: { id, start: 0 },
+      [`https://www.youtube.com/embed/${id}?start=10`]: { id, start: 10 },
+      [`https://www.youtube-nocookie.com/embed/${id}`]: { id, start: 0 },
+      [`  https://www.youtube.com/live/${id}  `]: { id, start: 0 },
+    };
+    for (const [input, expected] of Object.entries(cases)) assertEqual(parseYouTubeInput(input), expected, input);
+    for (const bad of ["", "hello", "aqz-KE-bpK", `https://vimeo.com/${id}`, `https://evil.com/watch?v=${id}`,
+                       `javascript:alert(1)`, "https://www.youtube.com/watch?v=short", `https://youtube.com.evil.com/watch?v=${id}`]) {
+      assertEqual(parseYouTubeInput(bad), null, bad);
+    }
+    assertEqual(parseStartTime("1h2m3s"), 3723);
+    assertEqual(formatTime(3723), "1:02:03");
+    assertEqual(formatTime(75), "1:15");
+  });
+
+  await test("YouTube controls drive the player API", async () => {
+    FakePlayer.instances.length = 0;
+    const { app, box, warnings } = mount("youtube", 800, 520);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const player = FakePlayer.instances[0];
+    assertEqual(player.options.videoId, DEMO_VIDEOS[0].id, "demo video cued");
+    assertEqual(player.iframe.parentElement?.dataset.widgetId, "player", "player inside the embed widget");
+    press(app, box, "play"); await tick();
+    assertEqual(textOf(box, "play"), "Pause", "button follows the playing state");
+    press(app, box, "play"); await tick();
+    press(app, box, "restart"); await tick();
+    press(app, box, "volume-down"); await tick();
+    press(app, box, "mute"); await tick();
+    press(app, box, "volume-up"); await tick();
+    press(app, box, "video"); await tick();
+    assertEqual(player.calls[0], "volume:70", "starting volume applied when the player is ready");
+    assertEqual(player.calls.slice(1),
+      ["play", "pause", "seek:0", "play", "volume:60", "mute", "volume:70", "unmute", "pause"]);
+    assertEqual(warnings, [], "no layout warnings");
+    app.destroy();
+    assertEqual(player.destroyed, true, "player destroyed with the window");
+  });
+
+  await test("YouTube loads a pasted link and reports bad input without touching the player", async () => {
+    FakePlayer.instances.length = 0;
+    const { app, box } = mount("youtube", 800, 520);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const player = FakePlayer.instances[0];
+    const field = box.querySelector('[data-widget-id="url"]');
+    field.value = "not a video";
+    field.dispatchEvent(new Event("input"));
+    field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" })); await tick();
+    assertEqual(textOf(box, "status"), "That is not a YouTube link or video ID.");
+    assertEqual(player.calls.some((c) => c.startsWith("load:")), false, "bad input does not load");
+    assertEqual(box.querySelector('[data-widget-id="play"]').classList.contains("surfaceos-widget--disabled"), false, "current video still playable");
+    field.value = "https://youtu.be/jNQXAC9IVRw?t=5";
+    field.dispatchEvent(new Event("input")); await tick();
+    press(app, box, "load"); await tick();
+    assertEqual(player.calls.includes("load:jNQXAC9IVRw:5"), true, "pasted link loaded with its start time");
+    assertEqual(field.value, "", "field clears after loading");
+    app.destroy();
+  });
+
+  await test("YouTube shows player errors and falls back to muted playback when sound is blocked", async () => {
+    FakePlayer.instances.length = 0;
+    const { app, box } = mount("youtube", 800, 520);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const player = FakePlayer.instances[0];
+    player.fail(150); await tick();
+    assertEqual(textOf(box, "overlay").startsWith("This video cannot play here"), true, "embedding error shown");
+    assertEqual(box.querySelector('[data-widget-id="play"]').classList.contains("surfaceos-widget--disabled"), true, "play disabled for a broken video");
+    press(app, box, "demo"); await tick();
+    assertEqual(textOf(box, "overlay"), undefined, "next demo clears the error");
+    FakePlayer.blockPlay = true;
+    press(app, box, "play"); await tick();
+    await new Promise((resolve) => setTimeout(resolve, 2700));
+    FakePlayer.blockPlay = false;
+    assertEqual(player.calls.includes("mute"), true, "muted after playback did not start");
+    assertEqual(textOf(box, "status").includes("Playing muted"), true, "explains the muted fallback");
+    app.destroy();
+  });
+
+  await test("two YouTube windows keep separate players", async () => {
+    FakePlayer.instances.length = 0;
+    const one = mount("youtube", 640, 420);
+    const two = mount("youtube", 640, 420);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const [first, second] = FakePlayer.instances;
+    press(one.app, one.box, "play"); await tick();
+    assertEqual(first.calls.includes("play"), true);
+    assertEqual(second.calls.includes("play"), false, "second window untouched");
+    one.app.destroy();
+    two.app.destroy();
   });
 
   // ---- Every app renders valid layouts at several window shapes ----

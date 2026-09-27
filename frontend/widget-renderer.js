@@ -3,7 +3,8 @@
 import { ICONS, createIcon } from './icons.js';
 
 const POINTER_TYPES = ['pointer_down', 'pointer_move', 'pointer_up', 'pointer_cancel'];
-const SUPPORTED = new Set(['button', 'text', 'canvas', 'video']);
+const SUPPORTED = new Set(['button', 'text', 'canvas', 'video', 'embed', 'input']);
+const MAX_INPUT_LENGTH = 500;
 const VARIANT_TOKEN = /^[a-z0-9-]{1,32}$/;
 // Tolerates float error such as x 0.6 + width 0.4 landing just above 1.
 const EPSILON = 1e-9;
@@ -37,6 +38,15 @@ function createElementFor(type) {
     element.playsInline = true;
     return element;
   }
+  if (type === 'input') {
+    const element = document.createElement('input');
+    element.type = 'text';
+    element.autocomplete = 'off';
+    element.spellcheck = false;
+    element.maxLength = MAX_INPUT_LENGTH;
+    return element;
+  }
+  // An embed is an empty container whose content is created by app code, never by layout data.
   return document.createElement(type === 'canvas' ? 'canvas' : 'div');
 }
 
@@ -126,7 +136,9 @@ export function createWidgetRenderer(container, { onAction = () => {}, warn = co
       if (invalid) skipped.push([`Ignoring invalid variant on widget "${widget.id}"`, widget]);
 
       const previous = nodes.get(widget.id);
-      const element = previous && previous.type === widget.type ? previous.element : createElementFor(widget.type);
+      const reused = previous && previous.type === widget.type;
+      const element = reused ? previous.element : createElementFor(widget.type);
+      if (!reused && widget.type === 'input') watchInput(element);
       const disabled = widget.type === 'button' && widget.disabled === true;
       const className = [
         'surfaceos-widget',
@@ -151,12 +163,21 @@ export function createWidgetRenderer(container, { onAction = () => {}, warn = co
         element.classList.toggle('surfaceos-has-icon', !!icon);
         element.classList.toggle('surfaceos-icon-only', !!icon && !text);
       }
+      let value = null;
+      if (widget.type === 'input') {
+        value = typeof widget.value === 'string' ? widget.value.slice(0, MAX_INPUT_LENGTH) : '';
+        // Only a changed layout value replaces the field, so typing is not overwritten by re-renders.
+        if (!reused || previous.value !== value) element.value = value;
+        element.placeholder = typeof widget.placeholder === 'string' ? widget.placeholder : '';
+      }
       const { x, y, width, height } = widget;
+      // Stacking follows layout order without moving elements; moving an iframe would reload it.
+      element.style.zIndex = String(ordered.length + 1);
       element.style.left = `${x * 100}%`;
       element.style.top = `${y * 100}%`;
       element.style.width = `${width * 100}%`;
       element.style.height = `${height * 100}%`;
-      const node = { id: widget.id, type: widget.type, x, y, width, height, disabled, element, text, icon };
+      const node = { id: widget.id, type: widget.type, x, y, width, height, disabled, element, text, icon, value };
       next.set(widget.id, node);
       ordered.push(node);
     }
@@ -168,9 +189,9 @@ export function createWidgetRenderer(container, { onAction = () => {}, warn = co
       warnings.remove();
       warnings = null;
     }
-    // Reorder only when needed; moving a live video or canvas is harmless but unnecessary.
-    const inOrder = ordered.every((node, i) => container.children[i] === node.element) && container.children.length === ordered.length;
-    if (!inOrder) container.append(...ordered.map((node) => node.element));
+    for (const node of ordered) {
+      if (node.element.parentElement !== container) container.append(node.element);
+    }
 
     nodes = next;
     buttons = ordered.filter((node) => node.type === 'button' && !node.disabled);
@@ -189,6 +210,31 @@ export function createWidgetRenderer(container, { onAction = () => {}, warn = co
     updateStates();
     for (const [message, widget] of skipped) report(message, widget);
     return true;
+  }
+
+  function emit(action) {
+    try {
+      onAction(action);
+    } catch (error) {
+      console.error('SurfaceOS widget onAction handler failed', error);
+    }
+  }
+
+  // Text fields report every edit as "change" and Enter as "submit", both with the current text.
+  function watchInput(element) {
+    const send = (event) => {
+      const id = element.dataset.widgetId;
+      if (current && nodes.get(id)?.element === element) {
+        emit({ version: 1, window_id: current.window_id, widget_id: id, event, value: element.value });
+      }
+    };
+    element.addEventListener('input', () => send('change'));
+    element.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        send('submit');
+      }
+    });
   }
 
   function buttonAt(x, y) {
@@ -236,11 +282,7 @@ export function createWidgetRenderer(container, { onAction = () => {}, warn = co
     pressedOver = false;
     updateStates();
     if (pressed && hit?.id === pressed.widgetId && pressed.windowId === current.window_id) {
-      try {
-        onAction({ version: 1, window_id: pressed.windowId, widget_id: pressed.widgetId, event: 'activate' });
-      } catch (error) {
-        console.error('SurfaceOS widget onAction handler failed', error);
-      }
+      emit({ version: 1, window_id: pressed.windowId, widget_id: pressed.widgetId, event: 'activate' });
       return true;
     }
     return false;

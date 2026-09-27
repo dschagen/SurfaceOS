@@ -10,5 +10,6 @@ import pong from './pong.js';
 import chess from './chess.js';
 import music from './music.js';
 import weather from './weather.js';
+import youtube from './youtube.js';
 
-export const APPS = { calculator, browser, todo, notepad, calendar, timer, pong, chess, music, weather };
+export const APPS = { calculator, browser, todo, notepad, calendar, timer, pong, chess, music, weather, youtube };

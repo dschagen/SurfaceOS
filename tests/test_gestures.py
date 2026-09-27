@@ -1,15 +1,15 @@
 import unittest
 
 from helpers import make_hand
-from gestures.gesture_detector import PINCH_END, PINCH_START, THUMBS_DOWN, GestureDetector
+from gestures.gesture_detector import PEACE_SIGN, PINCH_END, PINCH_START, THUMBS_DOWN, GestureDetector
 from gestures.hand_pose import is_pointing
 from gestures.static_gestures import StaticGestureFilter
 from vision.hand_identity import HandIdentifier
 
 SETTINGS = {
     "pinch": {"start_ratio": 0.25, "end_ratio": 0.35},
-    "two_hand": {"single_max_spread": 0.05, "double_interval_s": 0.45},
-    "thumbs_down": {"hold_s": 0.5},
+    "gestures": {"hold_s": 0.5},
+    "two_hand": {"hold_max_spread": 0.05},
     "scroll": {"flick_min_speed": 1.0, "coast_s": 0.5},
     "static_gestures": {"min_score": 0.6, "stable_frames": 3},
 }
@@ -68,6 +68,34 @@ class GestureDetectorTests(unittest.TestCase):
             _, events = detector.update([make_hand(gesture="Open_Palm", score=0.9)], now=frame * 0.05)
             found += types(events)
         self.assertNotIn(THUMBS_DOWN, found)
+
+    def test_peace_sign_fires_once_after_hold_with_progress(self):
+        detector = GestureDetector(SETTINGS)
+        hand = make_hand(gesture="Victory", score=0.9)
+        fired_at, progress = [], []
+        for frame in range(40):
+            now = frame * 0.05
+            states, events = detector.update([hand], now=now)
+            progress.append(states[0].pose_hold_progress)
+            if PEACE_SIGN in types(events):
+                fired_at.append(now)
+        self.assertEqual(len(fired_at), 1)
+        self.assertAlmostEqual(fired_at[0], 0.6, places=5)
+        building = progress[:12]
+        self.assertTrue(all(a <= b for a, b in zip(building, building[1:])))  # fills up
+        self.assertGreater(max(progress), 0.8)
+        self.assertEqual(progress[-1], 0.0)  # cleared after firing
+
+    def test_switching_pose_restarts_hold(self):
+        detector = GestureDetector(SETTINGS)
+        found = []
+        for frame in range(10):   # thumbs down for 0.45 s, stable after 0.1 s: not yet held 0.5 s
+            _, events = detector.update([make_hand(gesture="Thumb_Down", score=0.9)], now=frame * 0.05)
+            found += types(events)
+        for frame in range(10, 20):
+            _, events = detector.update([make_hand(gesture="Victory", score=0.9)], now=frame * 0.05)
+            found += types(events)
+        self.assertEqual(found, [])
 
     def test_pointing_state(self):
         detector = GestureDetector(SETTINGS)

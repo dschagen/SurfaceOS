@@ -1,11 +1,22 @@
 // Transport only: forwards the hand tracker's WebSocket messages (docs/input.md) to the shell's
-// input handler, which already takes the same v1 events from the mouse.
+// input handler, which already takes the same v1 events from the mouse, and lets the shell
+// send calibration requests back through window.SurfaceOSHand.send(message).
 // ?hand=off disables it; ?hand=ws://host:port connects somewhere other than the default.
 
 const DEFAULT_URL = 'ws://localhost:8765';
 const RETRY_MS = 2000;
 const setting = new URLSearchParams(location.search).get('hand');
 const indicator = document.querySelector('#hand-status');
+let current = null;
+
+// Returns false when no tracker is connected, so the caller can explain it.
+window.SurfaceOSHand = Object.freeze({
+  send(message) {
+    if (!current || current.readyState !== WebSocket.OPEN) return false;
+    current.send(JSON.stringify(message));
+    return true;
+  },
+});
 
 function showHands(hands) {
   window.dispatchEvent(new CustomEvent('surfaceos:hand-debug', { detail: hands }));
@@ -29,6 +40,7 @@ function connect(url) {
   }
   socket.addEventListener('open', () => {
     opened = true;
+    current = socket;
     show('Hand · connected', true);
   });
   socket.addEventListener('message', (e) => {
@@ -51,6 +63,7 @@ function connect(url) {
     window.SurfaceOS?.dispatchInput(message);
   });
   socket.addEventListener('close', () => {
+    if (current === socket) current = null;
     showHands([]);
     // A dropped tracker releases any hand press; failed reconnects must not cancel mouse work.
     if (opened) window.SurfaceOS?.dispatchInput({ version: 1, type: 'pointer_cancel', source: 'hand' });

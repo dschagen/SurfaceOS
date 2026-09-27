@@ -20,14 +20,19 @@ import time
 import urllib.request
 from pathlib import Path
 
+import cv2
+import numpy as np
 from websockets.sync.client import connect
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
+from calibration.coordinate_mapper import CoordinateMapper  # noqa: E402
+from calibration.marker_calibration import COLLECT_S, SETTLE_S, MarkerCalibration, parse_request  # noqa: E402
 from input.events import (POINTER_CANCEL, POINTER_DOWN, POINTER_MOVE,  # noqa: E402
                           POINTER_UP, TWO_HAND_PINCH_START, TWO_HAND_PINCH_MOVE,
-                          TWO_HAND_PINCH_END, TWO_HAND_SINGLE_PINCH, Pointer, SurfaceInputEvent)
+                          TWO_HAND_PINCH_END, TWO_HAND_HOLD, HOLD_PROGRESS, PEACE_SIGN, THUMBS_DOWN,
+                          Pointer, SurfaceInputEvent)
 from server.protocol import encode, hands_debug_message  # noqa: E402
 from server.server import SurfaceServer  # noqa: E402
 
@@ -145,8 +150,17 @@ class Hand:
 
     def pinch(self, x: float, y: float) -> None:
         self.move(x, y)
+        for _ in range(9):
+            self.send(POINTER_MOVE, x, y)
         self.send(POINTER_DOWN)
         self.send(POINTER_UP)
+
+    def dwell(self, x: float, y: float) -> None:
+        self.move(x, y)
+        # DWELL_MS in surfaceos-shell/frontend/scripts/dwell.js, plus a margin.
+        deadline = time.monotonic() + 4.3
+        while time.monotonic() < deadline:
+            self.send(POINTER_MOVE, x, y)
 
     def rectangle(self, event_type: str, x: float, y: float, width: float, height: float) -> None:
         self.server.publish(encode(SurfaceInputEvent(event_type, None, x, y, width, height)))
@@ -158,6 +172,44 @@ class Hand:
         primary = next((hand_id for hand_id, *_, is_primary in hands if is_primary), None)
         self.server.publish(hands_debug_message(pointers, primary))
         time.sleep(0.1)
+
+
+def answer_calibration(browser: Browser, hand: Hand) -> dict:
+    """Plays the tracker's camera: photographs the projected markers with a browser screenshot
+    and solves them with the real marker calibration, so camera coordinates equal page coordinates."""
+    deadline = time.monotonic() + 5
+    request = None
+    while request is None and time.monotonic() < deadline:
+        request = next((parse_request(message) for message in hand.server.poll()), None)
+        time.sleep(0.05)
+    check(request is not None, "shell sends a calibration request with its markers")
+    png = base64.b64decode(browser.send("Page.captureScreenshot", format="png")["data"])
+    frame = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR)
+    calibration = MarkerCalibration(CoordinateMapper(False))
+    calibration.start(request, 0.0)
+    result = calibration.update(frame, SETTLE_S) or calibration.update(frame, SETTLE_S + COLLECT_S)
+    hand.server.publish(result)
+    return result
+
+
+def click_button(browser: Browser, container: str, text: str) -> None:
+    """Clicks the visible button with this exact text inside container."""
+    box = browser.wait_for(f"""(() => {{ const b = [...document.querySelectorAll({json.dumps(container + ' button')})]
+        .find(e => e.textContent.trim() === {json.dumps(text)} && e.offsetParent);
+        if (!b) return null; const r = b.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }})()""",
+                           label=f"button {text}")
+    browser.click(*box)
+
+
+def dialog_title(browser: Browser) -> str:
+    return browser.wait_for("!document.querySelector('#dialog').hidden && document.querySelector('#dialog h2').textContent",
+                            label="dialog")
+
+
+def surface_point(browser: Browser, u: float, v: float) -> tuple[float, float]:
+    h = browser.eval("window.SurfaceOS.getState().surfaces[0].h")
+    d = h[6] * u + h[7] * v + h[8]
+    return (h[0] * u + h[1] * v + h[2]) / d, (h[3] * u + h[4] * v + h[5]) / d
 
 
 def check(condition, message: str) -> None:
@@ -176,9 +228,14 @@ def run(browser: Browser, hand: Hand, base_url: str, hand_url: str) -> None:
     check(browser.eval(f"{state}.surfaces.length") == 1, "first surface has a homography")
     browser.click(*browser.center("#finish-setup"))
     browser.click(*browser.center("#dialog button:first-child"))
-    for x, y in ((.2, .3), (.8, .3), (.8, .75), (.2, .75)):
-        hand.pinch(x, y)
-    check(browser.wait_for(f"{state}.phase === 'workspace'", label="hand alignment"), "four hand targets align input")
+    check(browser.wait_for("!!document.querySelector('.marker-plane')", label="markers"), "markers are projected on the surface")
+    result = answer_calibration(browser, hand)
+    check(result["ok"] and result["markers_found"] == 12, f"all 12 markers found ({result.get('error_px')} px error)")
+    check(browser.wait_for(f"{state}.phase === 'finger'", label="fingertip step"), "camera mapping is accepted")
+    hand.dwell(*surface_point(browser, .5, .5))
+    check(browser.wait_for(f"{state}.phase === 'camera-check'", label="check step"), "fingertip hold on C records the offset")
+    hand.dwell(*surface_point(browser, .5, .22))
+    check(browser.wait_for(f"{state}.phase === 'workspace'", label="hand alignment"), "hold on OK accepts the surface")
     check(browser.eval(f"{state}.windows.length") == 0, "no windows restored")
 
     print("Mouse: choose action before drawing, then select Calculator")
@@ -189,7 +246,7 @@ def run(browser: Browser, hand: Hand, base_url: str, hand_url: str) -> None:
     cx, cy = browser.center(".picker")
     browser.send("Input.dispatchMouseEvent", type="mouseWheel", x=cx, y=cy, deltaX=0, deltaY=120)
     browser.wait_for(f"{state}.windows[0].pickerIndex === 1", label="picker scroll")
-    browser.click(*browser.center(".picker button"))
+    browser.click(*browser.center(".picker .picker-confirm"))
     check(browser.eval(f"{state}.windows[0].content") == "calculator", "selected app mounts")
     for key in ["key-7", "key-times", "key-6", "key-equals"]:
         browser.click(*browser.center(f'[data-surfaceos-window="window-1"] [data-widget-id="{key}"]'))
@@ -197,22 +254,22 @@ def run(browser: Browser, hand: Hand, base_url: str, hand_url: str) -> None:
     check(browser.eval(f"document.querySelector('{display}').textContent") == "42", "widget receives mouse input")
 
     print("Hand: request actions, draw another window with two hands")
-    hand.send(TWO_HAND_SINGLE_PINCH)
-    check(browser.wait_for("!document.querySelector('#dialog').hidden", label="gesture confirmation"),
-          "two-hand single pinch asks for confirmation")
-    browser.click(*browser.center("#dialog button:first-child"))
-    browser.click(*browser.center('[data-action="new"]'))
+    hand.send(TWO_HAND_HOLD)
+    check(dialog_title(browser) == "Open main menu?", "two-hand hold asks for confirmation")
+    click_button(browser, "#dialog", "Yes")
+    check(browser.eval("[...document.querySelectorAll('#actions button')].map(b => b.textContent).join('|')")
+          == "Make Window|Screenshot|New Surface", "main menu offers Make Window, Screenshot, New Surface")
+    click_button(browser, "#actions", "Make Window")
     hand.rectangle(TWO_HAND_PINCH_START, .56, .34, .06, .06)
     hand.rectangle(TWO_HAND_PINCH_MOVE, .56, .34, .18, .34)
     hand.rectangle(TWO_HAND_PINCH_END, .56, .34, .18, .34)
     check(browser.wait_for(f"{state}.windows.length === 2", label="second window"),
           "two-hand rectangle creates a second nonoverlapping window")
-    browser.click(*browser.center(".surface-window:last-child .picker button"))
+    browser.click(*browser.center(".surface-window:last-child .picker .picker-confirm"))
     check(browser.eval(f"{state}.windows[1].content") == "notes", "second window selected Notes")
     browser.click(*browser.center("#manage-button"))
-    browser.click(*browser.center("#dialog button:first-child"))
-    browser.click(*browser.center("#dialog button:first-child"))
-    browser.click(*browser.center("#dialog button:first-child"))
+    click_button(browser, "#dialog", "Yes")
+    click_button(browser, "#dialog", "Move")
     browser.click(*browser.center('[data-window-id="window-2"] .window-header'))
     check(browser.eval(f"{state}.mode") == "move-ready", "one click selects move target")
     before = browser.eval(f"{state}.windows.find(w => w.id === 'window-2').y")
@@ -221,6 +278,47 @@ def run(browser: Browser, hand: Hand, base_url: str, hand_url: str) -> None:
     after = browser.eval(f"{state}.windows.find(w => w.id === 'window-2').y")
     check(after > before, "selected window moves without overlap")
     check(browser.eval(f"{state}.phase") == "workspace", "remains in workspace")
+
+    print("Gestures: hold ring, peace sign, thumbs down, new surface, close surface")
+    hand.send(POINTER_MOVE, .5, .5)
+    hand.server.publish(encode(SurfaceInputEvent(HOLD_PROGRESS, None, progress=0.6)))
+    check(browser.wait_for("getComputedStyle(cursor).getPropertyValue('--hold').trim() === '0.6'", label="hold ring"),
+          "hold progress fills the cursor ring")
+    check(browser.eval("getComputedStyle(cursor).width") == "15px", "cursor ring is 15px")
+    hand.server.publish(encode(SurfaceInputEvent(HOLD_PROGRESS, None, progress=0.0)))
+
+    hand.send(PEACE_SIGN)
+    check(dialog_title(browser) == "Manage windows?", "peace sign asks to manage windows")
+    click_button(browser, "#dialog", "Yes")
+    check(browser.eval("[...document.querySelectorAll('#dialog button')].map(b => b.textContent).join('|')")
+          == "Move|Resize|Change surface|Cancel", "manage menu offers Move, Resize, Change surface")
+    click_button(browser, "#dialog", "Cancel")
+
+    hand.send(THUMBS_DOWN)
+    check(dialog_title(browser) == "Close something?", "thumbs down asks to close something")
+    click_button(browser, "#dialog", "Yes")
+    click_button(browser, "#dialog", "Window")
+    browser.click(*browser.center('[data-window-id="window-1"] .window-header'))
+    check(browser.wait_for(f"{state}.windows.length === 1", label="window closed"), "thumbs down closes the picked window")
+
+    browser.click(*browser.center("#actions-button"))
+    click_button(browser, "#dialog", "Yes")
+    click_button(browser, "#actions", "New Surface")
+    check(browser.wait_for(f"{state}.phase === 'calibration'", label="new surface"), "New Surface returns to corner setup")
+    check(browser.eval(f"{state}.windows.length") == 1, "existing windows stay during New Surface")
+    click_button(browser, "#setup", "Cancel new surface")
+    check(browser.wait_for(f"{state}.phase === 'workspace'", label="cancel new surface"), "New Surface can be cancelled")
+
+    browser.click(*browser.center("#close-button"))
+    click_button(browser, "#dialog", "Yes")
+    click_button(browser, "#dialog", "Surface")
+    x, y = surface_point(browser, .9, .9)
+    browser.click(x * WIDTH, y * HEIGHT)
+    check(dialog_title(browser) == "Close Surface 1?", "picking a surface asks before closing it")
+    click_button(browser, "#dialog", "Yes")
+    check(browser.wait_for(f"{state}.surfaces.length === 0 && {state}.windows.length === 0", label="surface closed"),
+          "closing a surface removes it and its windows")
+    check(browser.eval(f"{state}.phase") == "calibration", "with no surfaces left, setup starts again")
 
 
 def main() -> int:

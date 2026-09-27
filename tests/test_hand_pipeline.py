@@ -19,9 +19,9 @@ class HandPipelineTests(unittest.TestCase):
         self.now = 0.0
 
     def frame(self, hands):
-        self.now += 1.0  # far apart, so no double pinch
+        self.now += 1.0  # longer than the hold time, so a pinch presses on its second frame
         states, gesture_events = self.gestures.update(hands, now=self.now)
-        pointers, events = self.interaction.update(hands, states, gesture_events, self.mapper)
+        pointers, events = self.interaction.update(hands, states, gesture_events, self.mapper, now=self.now)
         sending = self.primary.hand_id
         messages = primary_messages(events, self.primary, pointers)
         return messages, hands_debug_message(pointers, sending)
@@ -33,13 +33,15 @@ class HandPipelineTests(unittest.TestCase):
         for x in (0.41, 0.42, 0.43):
             sent += self.frame([make_hand(tip=(x, 0.5), pinch_ratio=PINCHED)])[0]
         sent += self.frame([make_hand(tip=(0.43, 0.5), pinch_ratio=OPEN)])[0]
-        presses = [m["type"] for m in sent if m["type"] != "pointer_move"]
+        presses = [m["type"] for m in sent if m["type"] not in ("pointer_move", "hold_progress")]
         self.assertEqual(presses, ["pointer_down", "pointer_up"])  # held movement never repeats the press
         self.assertEqual(sum(m["type"] == "pointer_move" for m in sent), 5)
 
+        # A pinch lost before its hold time never pressed; the loss still cancels.
         sent = self.frame([make_hand(tip=(0.43, 0.5), pinch_ratio=PINCHED)])[0]
         sent += self.frame([])[0]
-        self.assertEqual([m["type"] for m in sent], ["pointer_move", "pointer_down", "pointer_cancel"])
+        self.assertEqual([m["type"] for m in sent if m["type"] != "hold_progress"],
+                         ["pointer_move", "pointer_cancel"])
 
     def test_bubbles_match_pointer_positions_and_state(self):
         self.frame([make_hand(0, tip=(0.2, 0.3)), make_hand(1, tip=(0.8, 0.6))])
