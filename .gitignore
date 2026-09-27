@@ -5,3 +5,4 @@ snips/
 models/*.task
 .vscode/
 AGENTS.md
+.env
