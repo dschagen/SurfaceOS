@@ -47,9 +47,13 @@ class InteractionState:
         self._flick_min_speed = settings["scroll"]["flick_min_speed"]
         self._coast_s = settings["scroll"]["coast_s"]
         self._hold_s = settings["gestures"]["hold_s"]
+        self._firm_pinch_ratio = settings["pinch"]["start_ratio"]
         self._two_hand = TwoHandPinch(self._hold_s, settings["two_hand"]["hold_max_spread"])
         self._positions: dict[int, Point] = {}
         self._down: set[int] = set()
+        # Where each pressed hand last was with its fingers fully closed. Opening the fingers
+        # moves the fingertip before the release is detected, so pointer_up is sent from here.
+        self._firm_positions: dict[int, Point] = {}
         self._suppressed: set[int] = set()
         # When each hand's current pinch began, until it presses.
         self._pinch_since: dict[int, float] = {}
@@ -79,6 +83,7 @@ class InteractionState:
             for hand in hands:
                 if hand.hand_id in self._down:
                     self._down.discard(hand.hand_id)
+                    self._firm_positions.pop(hand.hand_id, None)
                     events.append(SurfaceInputEvent(POINTER_CANCEL, hand.hand_id,
                                                     *self._positions[hand.hand_id]))
                 self._suppressed.add(hand.hand_id)
@@ -105,15 +110,20 @@ class InteractionState:
                 if now - since >= self._hold_s:
                     del self._pinch_since[hand_id]
                     self._down.add(hand_id)
+                    self._firm_positions[hand_id] = position
                     events.append(SurfaceInputEvent(POINTER_DOWN, hand_id, *position))
                 else:
                     hold_progress = max(hold_progress, (now - since) / self._hold_s)
-            elif not state.is_pinching:
+            elif state.is_pinching:
+                if state.pinch_ratio <= self._firm_pinch_ratio:
+                    self._firm_positions[hand_id] = position
+            else:
                 # A pinch released before hold_s never pressed, so it sends nothing.
                 self._pinch_since.pop(hand_id, None)
                 if hand_id in self._down:
                     self._down.discard(hand_id)
-                    events.append(SurfaceInputEvent(POINTER_UP, hand_id, *position))
+                    release = self._firm_positions.pop(hand_id, position)
+                    events.append(SurfaceInputEvent(POINTER_UP, hand_id, *release))
             hold_progress = max(hold_progress, state.pose_hold_progress)
 
             pointers.append(Pointer(id=hand_id, x=position[0], y=position[1],
@@ -146,6 +156,7 @@ class InteractionState:
                 self._down.discard(hand_id)
                 self._suppressed.discard(hand_id)
                 self._pinch_since.pop(hand_id, None)
+                self._firm_positions.pop(hand_id, None)
                 self._scroll.pop(hand_id, None)
                 events.append(SurfaceInputEvent(POINTER_CANCEL, hand_id, *self._positions[hand_id]))
                 del self._positions[hand_id]

@@ -15,18 +15,18 @@
     "release_grace_s": 0.1
   },
   "gestures": {
-    "hold_s": 0.5
+    "hold_s": 0.25
   },
   "two_hand": {
     "hold_max_spread": 0.05
   },
   "scroll": {
     "flick_min_speed": 1.0,
-    "coast_s": 0.5
+    "coast_s": 0.3
   },
   "static_gestures": {
     "min_score": 0.6,
-    "stable_frames": 5
+    "stable_frames": 3
   },
   "pointer": {
     "smoothing": 0.5

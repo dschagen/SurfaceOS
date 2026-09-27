@@ -45,10 +45,11 @@ coordinates. That offset corrects for where MediaPipe places the fingertip relat
 
 ## Gestures
 
-Every activating gesture must be held for `gestures.hold_s` (0.5 s in `config/settings.json`).
+Every activating gesture must be held for `gestures.hold_s` (0.25 s in `config/settings.json`).
 
 | Gesture | Event | Shell response |
 | --- | --- | --- |
+<<<<<<< HEAD
 | One-hand pinch held 0.5 s | `pointer_down`, then `pointer_up` on release | Click; keep pinching to drag. A shorter pinch sends nothing. |
 | Thumbs down held 0.5 s | `thumbs_down` with `x`, `y` | Yes/No, then **Window / Surface**, then pick the target. During an Ask AI step it cancels that step instead. |
 | Thumbs up held 0.5 s | `thumbs_up` with `x`, `y` | Ask AI next to the hand: **Voice / Screenshot / Cancel**. See `docs/ai.md`. |
@@ -56,6 +57,14 @@ Every activating gesture must be held for `gestures.hold_s` (0.5 s in `config/se
 | Index finger pointing | `scroll` with `dy` while held, with a short coast after a flick | Scrolls lists and window content. |
 | Both hands pinched and still for 0.5 s | `two_hand_hold` with `x`, `y` | Yes/No, then **Make Window / Screenshot / New Surface**. |
 | Both hands pinched, then spread | `two_hand_pinch_start`, `_move`, `_end` with `x`, `y`, `width`, `height` | Draws the area after Make Window or Screenshot. `two_hand_pinch_cancel` if a hand is lost. |
+=======
+| One-hand pinch held 0.25 s | `pointer_down`, then `pointer_up` on release | The click happens on release, where the pointer is then. Drags (drawing, moving) start on the press. A shorter pinch sends nothing. |
+| Thumbs down held 0.25 s | `thumbs_down` with `x`, `y` | Yes/No, then **Window / Surface**, then pick the target. |
+| Peace sign held 0.25 s | `peace_sign` with `x`, `y` | Yes/No, then **Move / Resize / Change surface**, then pick the window. |
+| Index finger pointing | `scroll` with `dy` (finger movement in canvas heights) while held, with a 0.3 s coast after a flick | The program picker steps one entry per 0.08 of finger travel; window content scrolls at half the finger's movement. |
+| Both hands pinched and still for 0.25 s | `two_hand_hold` with `x`, `y` | Yes/No, then **Make Window / Screenshot / New Surface**. |
+| Both hands pinched, then spread | `two_hand_pinch_start`, `_move`, `_end` with `x`, `y`, `width`, `height` | Draws the area after Make Window or Screenshot; during Resize, sets the selected window's new bounds and releasing keeps them. `two_hand_pinch_cancel` if a hand is lost. |
+>>>>>>> 0f56f5bc706b80b56daacb4cda22a097d6044217
 
 While any hold is building up, the tracker sends the progress of the one closest to firing, so the
 cursor ring can fill. It is sent only when the value changes, and returns to 0 when a hold fires or stops:
@@ -64,9 +73,15 @@ cursor ring can fill. It is sent only when the value changes, and returns to 0 w
 { "version": 1, "type": "hold_progress", "progress": 0.6, "source": "hand" }
 ```
 
+<<<<<<< HEAD
 The static poses come from MediaPipe's gesture recognizer (`Thumb_Down`, `Thumb_Up`, `Victory`); a pose must be
 stable for `static_gestures.stable_frames` frames before its 0.5 s hold starts. Like the other poses, a
 thumbs up fires once per hold, from either hand. `two_hand_single_pinch`, `two_hand_double_pinch` and the one-hand
+=======
+The static poses come from MediaPipe's gesture recognizer (`Thumb_Down`, `Victory`); a pose must be
+stable for `static_gestures.stable_frames` frames before its 0.25 s hold starts. Thumbs up is reserved
+for Ask AI and is not sent yet. `two_hand_single_pinch`, `two_hand_double_pinch` and the one-hand
+>>>>>>> 0f56f5bc706b80b56daacb4cda22a097d6044217
 `double_pinch` are no longer sent.
 
 ## Event order within one frame
@@ -81,8 +96,10 @@ are separate from widget presses.
 
 ## Pinch details
 
-- A pinch held 0.5 s produces one `pointer_down`; releasing produces one `pointer_up`. Holding and
+- A pinch held 0.25 s produces one `pointer_down`; releasing produces one `pointer_up`. Holding and
   moving produces only `pointer_move` while pressed.
+- Opening the fingers moves the fingertip before the release is detected, so `pointer_up` carries the
+  last position where the fingers were fully closed (pinch ratio at or below `pinch.start_ratio`).
 - When a second hand starts pinching, any press by the first hand is cancelled so a two-hand gesture
   never clicks a widget. Hands in a two-hand gesture press again only after releasing their pinch.
 - One-hand `pointer_down` / `pointer_up` confirms the centered program picker item or

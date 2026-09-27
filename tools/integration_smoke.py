@@ -32,7 +32,7 @@ from calibration.marker_calibration import COLLECT_S, SETTLE_S, MarkerCalibratio
 from input.events import (POINTER_CANCEL, POINTER_DOWN, POINTER_MOVE,  # noqa: E402
                           POINTER_UP, TWO_HAND_PINCH_START, TWO_HAND_PINCH_MOVE,
                           TWO_HAND_PINCH_END, TWO_HAND_HOLD, HOLD_PROGRESS, PEACE_SIGN, THUMBS_DOWN,
-                          Pointer, SurfaceInputEvent)
+                          SCROLL, Pointer, SurfaceInputEvent)
 from server.protocol import encode, hands_debug_message  # noqa: E402
 from server.server import SurfaceServer  # noqa: E402
 
@@ -206,6 +206,12 @@ def dialog_title(browser: Browser) -> str:
                             label="dialog")
 
 
+def page_point(browser: Browser, selector: str) -> tuple[float, float]:
+    """Center of an element as page fractions, which equal hand coordinates after the screenshot calibration."""
+    x, y = browser.center(selector)
+    return x / WIDTH, y / HEIGHT
+
+
 def surface_point(browser: Browser, u: float, v: float) -> tuple[float, float]:
     h = browser.eval("window.SurfaceOS.getState().surfaces[0].h")
     d = h[6] * u + h[7] * v + h[8]
@@ -265,8 +271,33 @@ def run(browser: Browser, hand: Hand, base_url: str, hand_url: str) -> None:
     hand.rectangle(TWO_HAND_PINCH_END, .56, .34, .18, .34)
     check(browser.wait_for(f"{state}.windows.length === 2", label="second window"),
           "two-hand rectangle creates a second nonoverlapping window")
-    browser.click(*browser.center(".surface-window:last-child .picker .picker-confirm"))
-    check(browser.eval(f"{state}.windows[1].content") == "notes", "second window selected Notes")
+    px, py = page_point(browser, '[data-window-id="window-2"] .picker strong')
+    for dy in (0.02, 0.02, 0.02):
+        hand.server.publish(encode(SurfaceInputEvent(SCROLL, 0, px, py, dy=dy)))
+    time.sleep(0.2)
+    check(browser.eval(f"{state}.windows[1].pickerIndex") == 0, "small finger movement does not jump the picker")
+    hand.server.publish(encode(SurfaceInputEvent(SCROLL, 0, px, py, dy=0.03)))
+    check(browser.wait_for(f"{state}.windows[1].pickerIndex === 1", label="picker step"), "picker steps once per 8% of finger travel")
+    hand.server.publish(encode(SurfaceInputEvent(SCROLL, 0, px, py, dy=-0.09)))
+    check(browser.wait_for(f"{state}.windows[1].pickerIndex === 0", label="picker back"), "scrolling back steps back")
+    hand.move(px, py)
+    hand.send(POINTER_DOWN)
+    check(browser.eval(f"{state}.windows[1].content") == "picker", "the press alone does not open a program")
+    hand.send(POINTER_UP)
+    check(browser.wait_for(f"{state}.windows[1].content === 'notes'", label="picker release"),
+          "releasing the pinch on the picker opens Notes")
+
+    print("Hand: a click happens where the pinch is released")
+    hand.send(TWO_HAND_HOLD)
+    dialog_title(browser)
+    hand.move(*page_point(browser, "#dialog button:last-child"))    # press on No
+    hand.send(POINTER_DOWN)
+    hand.move(*page_point(browser, "#dialog button:first-child"))   # release on Yes
+    hand.send(POINTER_UP)
+    check(browser.wait_for("!document.querySelector('#actions').hidden", label="release click"), "release on Yes chose Yes")
+    browser.send("Input.dispatchKeyEvent", type="keyDown", key="Escape", code="Escape", windowsVirtualKeyCode=27)
+    browser.wait_for(f"{state}.mode === 'idle'", label="menu closed")
+
     browser.click(*browser.center("#manage-button"))
     click_button(browser, "#dialog", "Yes")
     click_button(browser, "#dialog", "Move")
@@ -278,6 +309,40 @@ def run(browser: Browser, hand: Hand, base_url: str, hand_url: str) -> None:
     after = browser.eval(f"{state}.windows.find(w => w.id === 'window-2').y")
     check(after > before, "selected window moves without overlap")
     check(browser.eval(f"{state}.phase") == "workspace", "remains in workspace")
+
+    print("Hand: resize with two hands, Cancel, then release to keep")
+    before = browser.eval(f"{state}.windows[1]")
+
+    def start_resize():
+        browser.click(*browser.center("#manage-button"))
+        click_button(browser, "#dialog", "Yes")
+        click_button(browser, "#dialog", "Resize")
+        browser.click(*browser.center('[data-window-id="window-2"] .window-header'))
+
+    start_resize()
+    check(browser.eval("!document.querySelector('#edit-controls').hidden"), "Done and Cancel appear while resizing")
+    hand.rectangle(TWO_HAND_PINCH_START, .54, .30, .20, .30)
+    hand.rectangle(TWO_HAND_PINCH_MOVE, .54, .30, .28, .42)
+    check(browser.wait_for(f"{state}.windows[1].width > {before['width']} + 0.05", label="live resize"),
+          "window follows the two hands")
+    click_button(browser, "#edit-controls", "Cancel")
+    check(browser.eval(f"{state}.windows[1].width") == before["width"] and browser.eval(f"{state}.mode") == "idle",
+          "Cancel restores the size and ends resizing")
+    hand.rectangle(TWO_HAND_PINCH_END, .54, .30, .28, .42)   # a release after Cancel changes nothing
+    check(browser.eval(f"{state}.windows[1].width") == before["width"], "release after Cancel is ignored")
+    start_resize()
+    hand.rectangle(TWO_HAND_PINCH_START, .54, .30, .20, .30)
+    hand.rectangle(TWO_HAND_PINCH_MOVE, .54, .30, .28, .42)
+    hand.rectangle(TWO_HAND_PINCH_END, .54, .30, .28, .42)
+    check(browser.wait_for(f"{state}.mode === 'idle'", label="resize done"), "releasing both pinches keeps the size and ends resizing")
+    check(browser.eval(f"{state}.windows[1].width") > before["width"] + 0.05, "new size kept")
+    check(browser.eval("document.querySelector('#edit-controls').hidden"), "Done and Cancel hide afterwards")
+    browser.click(*browser.center("#manage-button"))
+    click_button(browser, "#dialog", "Yes")
+    click_button(browser, "#dialog", "Move")
+    browser.click(*browser.center('[data-window-id="window-2"] .window-header'))
+    click_button(browser, "#edit-controls", "Done")
+    check(browser.eval(f"{state}.mode") == "idle", "Done ends Move without dragging")
 
     print("Gestures: hold ring, peace sign, thumbs down, new surface, close surface")
     hand.send(POINTER_MOVE, .5, .5)

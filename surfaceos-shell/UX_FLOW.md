@@ -19,7 +19,7 @@ This document defines the intended user experience. The browser shell now implem
 ## Creating a window
 
 1. Choose **Make Window** or **Screenshot** **before** drawing.
-2. Define the area by pinching with both hands and moving them apart, or by pinching with one hand (held 0.5 s) and dragging, then release. The mouse can click and drag instead. Show the outline continuously.
+2. Define the area by pinching with both hands and moving them apart, or by pinching with one hand (held 0.25 s) and dragging, then release. The mouse can click and drag instead. Show the outline continuously.
 3. Reject or constrain placement that crosses a surface boundary or overlaps another window. Explain the constraint visibly instead of silently losing the action.
 4. The resulting window stays on its chosen surface until explicitly moved.
 
@@ -47,7 +47,7 @@ Ask AI is not in the main menu. A thumbs-up held 0.5 s opens a prompt next to th
 
 ## Gestures
 
-Every activating gesture is held for 0.5 s. While a hold builds up, the cursor ring (15 px, colored by surface) fills.
+Every activating gesture is held for 0.25 s. While a hold builds up, the cursor ring (15 px, colored by surface) fills.
 
 | Gesture | Shell response |
 | --- | --- |
@@ -60,7 +60,9 @@ Every activating gesture is held for 0.5 s. While a hold builds up, the cursor r
 | Thumbs up | **Ask AI** next to the hand: **Voice / Screenshot / Cancel**. |
 
 - **Move:** drag the selected window on its surface; prevent overlap and boundary crossing.
-- **Resize:** expose draggable controls on the selected window's four corners; keep it within its surface and free of overlap.
+- **Resize:** pinch with both hands and spread them; the rectangle between the hands becomes the window's new size live, and releasing both pinches keeps it and ends Resize. The mouse can drag the four corner handles instead. Keep the window within its surface and free of overlap.
+- **Move and Resize** show **Done** and **Cancel** buttons until they end. Cancel puts the window back where it was.
+- **Hand clicks happen on release:** pinch until the ring fills, then let go; the click lands where the ring is at that moment. Drags (drawing, moving) start when the ring fills.
 - **Change surface:** show large numbered labels on the other calibrated surfaces; choose a destination, pinch a free spot there, and prevent overlap.
 
 Gesture-triggered menus ask Yes/No once before opening, except for ordinary pointing and scrolling. Choices inside a menu are direct. A one-hand pinch confirms the centered program-picker item.
