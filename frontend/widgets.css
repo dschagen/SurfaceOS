@@ -41,7 +41,7 @@
   box-sizing: border-box; position: absolute; margin: 0;
   display: flex; align-items: center; justify-content: center; text-align: center;
   padding: 0 0.5em; overflow: hidden; overflow-wrap: anywhere;
-  font: 500 clamp(11px, 4.4cqmin, 40px)/1.25 "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  font: 500 clamp(14px, 5cqmin, 42px)/1.25 "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
   letter-spacing: 0.005em;
 }
 
@@ -66,7 +66,7 @@
 .surfaceos-widgets .surfaceos-widget--input {
   justify-content: flex-start; text-align: left; padding: 0 0.8em;
   color: var(--sw-text); background: rgba(0, 0, 0, 0.3); border: 1px solid var(--sw-border); border-radius: 0.6em;
-  font-size: clamp(11px, 3.4cqmin, 26px); outline: none; user-select: text;
+  font-size: clamp(14px, 4cqmin, 30px); outline: none; user-select: text;
 }
 .surfaceos-widgets .surfaceos-widget--input::placeholder { color: var(--sw-faint); }
 .surfaceos-widgets .surfaceos-widget--input:focus { border-color: color-mix(in srgb, var(--sw-accent) 70%, transparent); box-shadow: 0 0 0 0.12em color-mix(in srgb, var(--sw-accent) 30%, transparent); }
@@ -103,15 +103,15 @@
 /* Keeps the newest lines of long text visible by clipping from the top. */
 .surfaceos-widgets .surfaceos-v-tail { flex-direction: column; justify-content: flex-end; align-items: stretch; text-align: left; padding: 0.5em 0.8em; }
 .surfaceos-widgets .surfaceos-v-mono { font-family: "Cascadia Mono", Consolas, monospace; font-variant-numeric: tabular-nums; letter-spacing: 0; }
-.surfaceos-widgets .surfaceos-v-small { font-size: clamp(10px, 3.3cqmin, 26px); }
+.surfaceos-widgets .surfaceos-v-small { font-size: clamp(12px, 4cqmin, 28px); }
 .surfaceos-widgets .surfaceos-v-large { font-size: clamp(14px, 7cqmin, 64px); font-weight: 650; }
 .surfaceos-widgets .surfaceos-v-huge { font-size: clamp(20px, 17cqmin, 170px); font-weight: 300; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
-.surfaceos-widgets .surfaceos-v-title { font-weight: 700; font-size: clamp(12px, 5.2cqmin, 46px); }
+.surfaceos-widgets .surfaceos-v-title { font-weight: 700; font-size: clamp(16px, 5.8cqmin, 50px); }
 .surfaceos-widgets .surfaceos-v-muted { color: var(--sw-muted); }
 .surfaceos-widgets .surfaceos-v-faint { color: var(--sw-faint); }
 .surfaceos-widgets .surfaceos-v-error { color: #ff8f9a; }
 .surfaceos-widgets .surfaceos-v-accent-text { color: var(--sw-accent); }
-.surfaceos-widgets .surfaceos-v-label { font-size: clamp(9px, 2.8cqmin, 20px); font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--sw-muted); }
+.surfaceos-widgets .surfaceos-v-label { font-size: clamp(11px, 3.4cqmin, 24px); font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--sw-muted); }
 
 /* ---------- Surfaces ---------- */
 
@@ -120,7 +120,7 @@
   background: color-mix(in srgb, var(--sw-accent) 16%, transparent);
   border: 1px solid color-mix(in srgb, var(--sw-accent) 40%, transparent);
   color: color-mix(in srgb, var(--sw-accent) 70%, white);
-  border-radius: 999px; font-size: clamp(9px, 2.9cqmin, 22px); font-weight: 650;
+  border-radius: 999px; font-size: clamp(11px, 3.4cqmin, 24px); font-weight: 650;
 }
 .surfaceos-widgets .surfaceos-v-hero {
   background: radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--sw-accent) 32%, transparent), transparent 60%), var(--sw-surface);

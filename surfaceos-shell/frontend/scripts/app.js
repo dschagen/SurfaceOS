@@ -9,7 +9,7 @@ const dialog=$('dialog'), actions=$('actions'), outline=$('outline'), cursor=$('
 let surfaces=[], draft=[[.11,.22],[.89,.22],[.89,.83],[.11,.83]], windows=[], nextId=1;
 let phase='calibration', mode='idle', action=null, interaction=null, operation=null, selectedId=null;
 let activeId=null, renderer=null, sourceId=null, destinationId=null, cameraStep=null, pendingImage=null;
-let setupDrag=null;
+let setupDrag=null, hoveredHandWindowId=null;
 // Surface numbers are never reused after a close. Hand alignment covers surfaces from alignStart on.
 let nextSurface=1, alignStart=0;
 const HOLD_S=DWELL_MS/1000;
@@ -52,6 +52,14 @@ function showCursor(p,surfaceNumber=null,raw=false){
   cursor.hidden=false;cursor.style.left=`${p.x*100}%`;cursor.style.top=`${p.y*100}%`;
   cursor.classList.toggle('raw',raw);
   cursor.dataset.surface=surfaceNumber?String((surfaceNumber-1)%4+1):'none';
+}
+function setHandHover(target){
+  const id=target?.closest('.surface-window')?.dataset.windowId||null;
+  if(id===hoveredHandWindowId)return;
+  hoveredHandWindowId=id;
+  for(const frame of surfacesLayer.querySelectorAll('.surface-window')){
+    frame.classList.toggle('hand-hover',frame.dataset.windowId===id);
+  }
 }
 function setSetupMessage(text){$('setup-message').textContent=text;}
 function positionSetup(left,top){
@@ -98,7 +106,7 @@ function setupPreview(){
 }
 // Corner dragging for a new surface, at startup or from New Surface. Existing windows stay.
 function showCalibration(){
-  phase='calibration';setup.hidden=false;actions.hidden=true;labels.hidden=true;
+  phase='calibration';setHandHover(null);setup.hidden=false;actions.hidden=true;labels.hidden=true;
   for(const id of ['actions-button','manage-button','close-button'])$(id).hidden=true;
   $('surface-number').textContent=String(nextSurface);
   setup.querySelector('h1').firstChild.textContent='Define surface ';
@@ -238,7 +246,7 @@ function finishSetup(){
 }
 function enterWorkspace(){
   if(cameraStep){clearTimeout(cameraStep.timer);markerToken++;}
-  stage.classList.remove('marker-capture');cursor.hidden=true;
+  stage.classList.remove('marker-capture');cursor.hidden=true;setHandHover(null);
   phase='workspace';mode='idle';setup.hidden=true;calibration.hidden=true;actions.hidden=false;closePrompt();
   for(const id of ['actions-button','manage-button','close-button'])$(id).hidden=false;
   alignStart=surfaces.length;render();status('Choose Make Window, Screenshot, or New Surface');
@@ -306,6 +314,7 @@ function render(){
       const badge=document.createElement('span');badge.className='surface-badge';badge.dataset.surface=String((s.number-1)%4+1);badge.textContent=`SURFACE ${s.number}`;plane.append(badge);
       surfacesLayer.append(plane);
     }
+    plane.dataset.surface=String((s.number-1)%4+1);
     plane.style.width=`${width}px`;plane.style.height=`${height}px`;
     plane.style.transform=`matrix3d(${cssMatrix(s.h,width,height).join(',')})`;
     for(const w of windows.filter(w=>w.surface_id===s.id)){
@@ -319,9 +328,9 @@ function render(){
         const host=document.createElement('div');host.className='widget-host';renderContent(w,host);
         frame.append(bar,host);plane.append(frame);
       }
-      frame.className=`surface-window${w.id===activeId?' active':''}`;
+      frame.className=`surface-window${w.id===activeId?' active':''}${w.id===hoveredHandWindowId?' hand-hover':''}`;
       frame.style.zIndex=String(windows.indexOf(w)+1);rectStyle(frame,w);
-      frame.querySelector('.window-header').textContent=`${w.content==='picker'?'Select a program':w.content==='ai'?'Ask AI':w.content==='screenshot'?'Screenshot':renderer?.apps?.find(a=>a.type===w.content)?.title||w.content} · ${w.id}`;
+      frame.querySelector('.window-header').textContent=w.content==='picker'?'Select a program':w.content==='ai'?'Ask AI':w.content==='screenshot'?'Screenshot':renderer?.apps?.find(a=>a.type===w.content)?.title||w.content;
       frame.querySelectorAll('.resize-corner').forEach(handle=>handle.remove());
       if(mode==='resize-ready'&&selectedId===w.id) for(const key of ['nw','ne','se','sw']){
         const handle=document.createElement('span');handle.className=`resize-corner ${key}`;handle.dataset.resize=key;frame.append(handle);
@@ -340,9 +349,9 @@ function renderContent(w,host){
     w.pickerIndex=clamp(w.pickerIndex||0,0,list.length-1);
     const heading=document.createElement('p');heading.textContent='SELECT A PROGRAM';
     // The neighbouring entries are buttons, so a click or a pinch steps the list without needing the scroll gesture.
-    const step=(delta,label)=>{const b=document.createElement('button');b.type='button';b.className='picker-step';b.textContent=`${delta<0?'▲':'▼'} ${label}`;b.addEventListener('click',()=>cyclePicker(w.id,delta));return b;};
+    const step=(delta,label)=>{const b=document.createElement('button');b.type='button';b.className=`picker-step ${delta<0?'picker-prev':'picker-next'}`;b.textContent=`${delta<0?'▲':'▼'} ${label}`;b.addEventListener('click',()=>cyclePicker(w.id,delta));return b;};
     const before=step(-1,list[(w.pickerIndex-1+list.length)%list.length].title),current=document.createElement('strong'),after=step(1,list[(w.pickerIndex+1)%list.length].title);
-    current.textContent=`> ${list[w.pickerIndex].title} <`;
+    current.textContent=list[w.pickerIndex].title;
     const hint=document.createElement('button');hint.type='button';hint.className='picker-confirm';hint.textContent=`Open ${list[w.pickerIndex].title}`;hint.addEventListener('click',()=>selectProgram(w.id));
     picker.append(heading,before,current,after,hint);
     picker.addEventListener('wheel',e=>{e.preventDefault();cyclePicker(w.id,e.deltaY>0?1:-1);},{passive:false});
@@ -491,6 +500,7 @@ function handleInput(raw,target=null){
   if(raw.type==='pointer_cancel'||raw.type==='two_hand_pinch_cancel'){
     if(mode==='content'&&interaction){const w=windowById(interaction.id);if(w)deliverContent(w,{...interaction.last,type:'pointer_cancel'});}
     if(mode==='drawing'||mode==='moving'||mode==='resizing'){mode=mode==='drawing'?'armed':interaction?.returnMode||'idle';interaction=null;outline.hidden=true;render();}
+    if(raw.source==='hand')setHandHover(null);
     cursor.hidden=true;return true;
   }
   // A gesture menu never interrupts drawing, moving, or resizing.
@@ -525,12 +535,16 @@ function handleInput(raw,target=null){
   if(!Number.isFinite(raw.x)||!Number.isFinite(raw.y))return false;
   const e=pointForEvent(raw);
   if(!e){
+    if(raw.source==='hand')setHandHover(null);
     const off=raw.source==='hand'&&raw.type==='pointer_move'&&offSurfacePoint(raw);
     if(off)showCursor(off);
     return false;
   }
   target??=at(e);
-  if(raw.source==='hand')showCursor(e,surfaceAt(e)?.number);
+  if(raw.source==='hand'){
+    showCursor(e,surfaceAt(e)?.number);
+    if(raw.type==='pointer_move')setHandHover(target);
+  }
   if(e.type==='pointer_down'){
     // Widget-renderer buttons act on pointer events, not native clicks, so hand presses on them go to the window content below.
     const shellButton=target?.closest('button');
@@ -737,6 +751,6 @@ window.SurfaceOS=Object.freeze({
   dispatchInput:event=>handleInput(event),
   mountWidgetRenderer(value){if(!value||typeof value.renderLayout!=='function')throw new TypeError('Expected renderer');renderer=value;render();},
   getState:()=>({phase,mode,surfaces:structuredClone(surfaces),windows:structuredClone(windows)}),
-  reset:()=>{if(cameraStep)clearTimeout(cameraStep.timer);cameraStep=null;markerToken++;stage.classList.remove('marker-capture');cursor.hidden=true;surfaces=[];windows=[];nextId=1;nextSurface=1;alignStart=0;activeId=null;mode='idle';action=null;interaction=null;pendingImage=null;setupDrag=null;setup.classList.remove('is-moved');setup.style.left='';setup.style.top='';draft=[[.11,.22],[.89,.22],[.89,.83],[.11,.83]];showCalibration();},
+  reset:()=>{if(cameraStep)clearTimeout(cameraStep.timer);cameraStep=null;markerToken++;stage.classList.remove('marker-capture');cursor.hidden=true;surfaces=[];windows=[];nextId=1;nextSurface=1;alignStart=0;activeId=null;hoveredHandWindowId=null;mode='idle';action=null;interaction=null;pendingImage=null;setupDrag=null;setup.classList.remove('is-moved');setup.style.left='';setup.style.top='';draft=[[.11,.22],[.89,.22],[.89,.83],[.11,.83]];showCalibration();},
 });
 showCalibration();
