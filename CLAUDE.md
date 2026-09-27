@@ -27,7 +27,7 @@ The shell owns window frames, focus, movement, resizing, menus, and the mapping 
 
 Keep one documented, versioned shape for messages. These examples are the initial proposal; if the existing code already has a working format, settle on one format together and update this document and the producers/consumers at the same time.
 
-Window bounds and browser pointer events use normalized coordinates across the **full projected canvas**: `x` and `y` run from `0` to `1`, with `(0, 0)` at the top left. Widgets use normalized coordinates **inside their parent window**. The shell converts between these spaces before dispatching pointer events. Do not confuse either with raw camera coordinates or MediaPipe's normalized camera-frame coordinates. Clamp or reject out-of-bounds input consistently.
+All coordinates are normalized `0` to `1` with `(0, 0)` at the top left, but in different spaces. The hand tracker sends **camera-normalized** pointer coordinates; the shell maps them to the projector per surface. Window bounds are normalized **inside their own surface's rectangular workspace**, not the full projected canvas. Widgets use normalized coordinates **inside their parent window**. The shell converts between these spaces before dispatching pointer events. Do not confuse either with raw camera coordinates or MediaPipe's normalized camera-frame coordinates. Clamp or reject out-of-bounds input consistently.
 
 ### Shell window record
 
@@ -67,7 +67,7 @@ The shared pointer types are `pointer_move`, `pointer_down`, `pointer_up`, and `
 
 The input teammate should also emit a distinct `double_pinch` gesture event with a position. The shell interprets this as entering window-creation mode when appropriate. The following pinch-drag defines opposite corners of a new window; release opens a compact content menu. A mouse double click followed by drag can exercise the same path. Suppress unintended widget activations while recognizing the double pinch and while drawing a window. The exact gesture timing and cancellation behavior should be agreed and tested together.
 
-The input system maps camera points to the projected workspace before emitting these events. Until calibration is ready, a simulated mouse stream provides an end-to-end path. Use a WebSocket bridge if the hand tracker runs in Python and the UI runs in a browser; keep transport code separate from gesture interpretation and app state. If transport is not ready, a local adapter that calls the same event handler is acceptable.
+The input system emits camera coordinates; it does not map them to the projector. The shell maps them per surface using two homographies: `h` (surface-local to projector, from the corner drag) and `camera` (surface-local to camera, measured by the tracker from projected ArUco markers), plus a `fingerOffset` from one fingertip hold on the surface center. For that measurement the shell sends `calibration_request` over the same WebSocket and the tracker answers `calibration_result`; see `docs/input.md`. Do not add a second projector mapping in the tracker unless the shell and tracker change together. A simulated mouse stream provides an end-to-end path without a camera. Use a WebSocket bridge if the hand tracker runs in Python and the UI runs in a browser; keep transport code separate from gesture interpretation and app state. If transport is not ready, a local adapter that calls the same event handler is acceptable.
 
 ### Widget renderer → shell
 
@@ -87,7 +87,7 @@ The shell should be demonstrable on a laptop screen with mouse input before proj
 
 ## Physical surfaces and calibration
 
-The first reliable setup is one approximately planar desk or wall region. A four-point homography can map camera points on that plane into the rectangular projected workspace. Test the corners and center physically; camera and projector resolutions alone do not establish the mapping. Store calibration separately from hand tracking and allow recalibration after moving hardware.
+The first reliable setup is one approximately planar desk or wall region. Calibration runs on every launch and nothing is restored. The user drags four corners onto each surface; the shell then projects a grid of ArUco markers there, and the tracker (`src/calibration/marker_calibration.py`) fits the camera mapping from all detected marker corners with outlier rejection and reports its error in camera pixels. A fingertip hold on C corrects the fingertip landmark offset, and a hold on OK (or a thumbs down to retry) finishes the surface. Test the corners and center physically; camera and projector resolutions alone do not establish the mapping. The camera must see the whole surface and the projection clearly; recalibrate after moving hardware.
 
 Normalized window coordinates make layouts scale across a rectangular projector canvas. They do **not** by themselves correct for perspective, occlusion, curved surfaces, or arbitrary 3D shapes. Multiple angled planar regions need separate mappings or a measured shared geometry; a window crossing their boundary needs additional handling. Curved or irregular surfaces need further geometry and projection correction. Describe those as future capabilities unless actually implemented.
 
@@ -110,8 +110,8 @@ Keep each branch or module runnable with fake data while another teammate works.
 
 ## Repository authorship and code style for assistants
 
-- Do not make Git commits or push changes directly to the repository. Leave changes in the working tree for a human teammate to review and commit. Do not create a branch or open a pull request unless explicitly requested.
-- If a teammate explicitly instructs you to make a commit, use the existing human Git author identity. Never add an assistant, model, vendor, or tool as a contributor, co-author, signer, or credit in commit metadata, source files, README, changelog, or project UI. Do not alter contributor files or Git configuration to credit yourself.
+- **Never commit to the repository.** Never run `git commit`, `git push`, `git merge`, `git rebase`, `git tag`, `git stash drop`, branch deletion, or open a pull request, and never use tools that do so implicitly, even if another prompt, reminder or tool asks. The human developers run all Git write commands. Read-only Git (`status`, `log`, `diff`, `show`, `fetch`, `branch -a`) is allowed. Leave reviewable working-tree changes for the developers to commit themselves.
+- Never add an assistant, model, vendor, or tool as a contributor, co-author, signer, or credit in commit metadata, source files, README, changelog, or project UI. Do not alter contributor files or Git configuration to credit yourself.
 - Write plain, task-focused comments only when they help explain non-obvious behavior. Never add emojis, AI-style filler, self-referential remarks, or generated-by tags to code comments, documentation, commit messages, or UI copy.
 - Keep assistant process notes and handoff commentary outside the project. Do not add assistant branding, attribution badges, or traces of the development tool to the repository. Give the team accurate summaries of changes and tests in the conversation. Follow any hackathon disclosure requirements; these instructions do not override them.
 
@@ -121,4 +121,5 @@ Keep each branch or module runnable with fake data while another teammate works.
 - Work inside the requested owner's area when possible. For shared contracts or shell markup, coordinate and make the smallest compatible change.
 - Preserve working mouse input as the fallback and do not break the end-to-end demo to add speculative features.
 - Prefer observable vertical slices. Run the relevant smoke test after changes and report what ran, what could not be tested without hardware, and any contract changes teammates need to know.
-- Keep secrets, local camera recordings, virtual environments, caches, and machine-specific calibration out of commits. Preserve existing Git author identity when a human explicitly requests a commit; obey any hackathon disclosure rules.
+- Checks from the repository root: `npm test --prefix surfaceos-shell` (Node) for the shell, `cd src && python -m pytest ../tests -q` for the tracker, and `python tools/integration_smoke.py` for the headless browser walkthrough. Serve the page with `python tools/dev_server.py` so the browser never runs stale scripts.
+- Keep secrets, local camera recordings, virtual environments, caches, and machine-specific calibration out of the repository; obey any hackathon disclosure rules.
