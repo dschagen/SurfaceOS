@@ -12,6 +12,7 @@ This document defines the intended user experience. The browser shell now implem
 
 1. On every launch, show calibration before any windows.
 2. Mark the usable boundary of Surface 1. Calibrate the flat region's projected geometry. Then project a marker grid on the surface so the camera can measure it automatically, and explain any failure with Retry and Skip. Next, the user touches the center C and holds still for 4 seconds to correct the fingertip position; a filling progress ring resets if the hand moves or tracking stops. Finally, the calibrated cursor should follow the fingertip: holding on OK for 4 seconds accepts the surface, and a thumbs down retries it.
+   **Failsafe:** hand alignment can be skipped at any point. Skipped surfaces use an approximate mapping that assumes the camera sees the same area as the projection, so gestures still work, less precisely, and the status names those surfaces. A later real alignment replaces the approximation.
 3. Ask whether to add another surface. Repeat boundary calibration and number each surface until the user finishes. All demo surfaces use the same projector and are positioned within its illumination and usable focus range.
 4. Enter a nearly blank environment. Show the three main actions: **Make Window**, **Screenshot**, **New Surface**.
 5. Nothing from a previous session, including windows and notes, is automatically restored.

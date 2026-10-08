@@ -389,6 +389,29 @@ def run(browser: Browser, hand: Hand, base_url: str, hand_url: str) -> None:
           "closing a surface removes it and its windows")
     check(browser.eval(f"{state}.phase") == "calibration", "with no surfaces left, setup starts again")
 
+    print("Failsafe: skip hand alignment, hands still work approximately")
+    browser.click(*browser.center("#confirm-surface"))
+    click_button(browser, "#setup", "Finish setup")
+    click_button(browser, "#dialog", "Skip alignment")
+    check(browser.wait_for(f"{state}.phase === 'workspace'", label="skip"), "Skip alignment enters the workspace")
+    check(browser.eval(f"{state}.surfaces[0].cameraFallback === true && Array.isArray({state}.surfaces[0].camera)"),
+          "the skipped surface gets the approximate mapping")
+    check("Approximate hand tracking on surface" in browser.eval("document.querySelector('#status').textContent"),
+          "the status says hand tracking is approximate")
+    # In this headless run the "camera" sees exactly the page, so the approximation is exact here.
+    x, y = surface_point(browser, .5, .5)
+    hand.send(POINTER_MOVE, x, y)
+    check(browser.wait_for("!cursor.hidden", label="failsafe cursor"), "the hand ring appears without alignment")
+    left, top, color = browser.eval("[parseFloat(cursor.style.left), parseFloat(cursor.style.top), cursor.dataset.surface]")
+    # Surface numbers are not reused after a close, so this is the session's second surface.
+    number = browser.eval(f"String(({state}.surfaces[0].number - 1) % 4 + 1)")
+    check(abs(left - x * 100) < .5 and abs(top - y * 100) < .5 and color == number,
+          f"the ring follows the hand on the skipped surface (ring at {left:.1f}%, {top:.1f}%, surface {color}; "
+          f"hand at {x * 100:.1f}%, {y * 100:.1f}%)")
+    hand.send(TWO_HAND_HOLD)
+    check(dialog_title(browser) == "Open main menu?", "gestures work on the skipped surface")
+    click_button(browser, "#dialog", "No")
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])

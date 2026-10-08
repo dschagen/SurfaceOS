@@ -154,7 +154,7 @@ function alignmentText(title,description){
 }
 function alignmentButtons({skip=false,accept=false,retry=false}){
   $('confirm-surface').hidden=true;$('add-surface').hidden=true;
-  $('finish-setup').hidden=!skip;$('finish-setup').textContent='Skip hand alignment';
+  $('finish-setup').hidden=!skip;$('finish-setup').textContent='Skip alignment (approximate hands)';
   $('accept-alignment').hidden=!accept;$('retry-alignment').hidden=!retry;
 }
 function startCameraAlignment(){cameraStep={surface:alignStart};runMarkers();}
@@ -162,7 +162,7 @@ function startCameraAlignment(){cameraStep={surface:alignStart};runMarkers();}
 async function runMarkers(){
   const s=surfaces[cameraStep.surface],{width,height}=stageSize(),token=++markerToken;
   clearTimeout(cameraStep.timer);
-  s.camera=null;s.fingerOffset=null;s.cameraError=null;
+  s.camera=null;s.fingerOffset=null;s.cameraError=null;s.cameraFallback=false;
   // Size the grid by the surface's projected edge lengths so markers land square on the surface.
   const edge=(a,b)=>Math.hypot((s.corners[a][0]-s.corners[b][0])*width,(s.corners[a][1]-s.corners[b][1])*height);
   const layout=markerLayout((edge(0,1)+edge(3,2))/2,(edge(0,3)+edge(1,2))/2);
@@ -175,7 +175,7 @@ async function runMarkers(){
   if(phase!=='markers'||token!==markerToken)return;
   if(!window.SurfaceOSHand){markerFailed('This page loaded an outdated script. Reload with Ctrl+Shift+R, then set up again.');return;}
   const sent=window.SurfaceOSHand.send({version:1,type:'calibration_request',surface_id:s.id,markers:cameraStep.layout});
-  if(!sent){markerFailed('The hand tracker is not connected. Start python src/main.py and retry, or skip to use the mouse.');return;}
+  if(!sent){markerFailed('The hand tracker is not connected. Start python src/main.py and retry, or skip to use approximate hand tracking and the mouse.');return;}
   cameraStep.timer=setTimeout(()=>{
     if(phase==='markers'&&token===markerToken)markerFailed('The hand tracker did not answer. Check that it is running, then retry.');
   },MARKER_TIMEOUT_MS);
@@ -185,7 +185,7 @@ function markerFailed(reason){
   phase='marker-failed';stage.classList.remove('marker-capture');
   alignmentText('Camera alignment failed · surface ',reason);
   alignmentButtons({skip:true,retry:true});
-  setSetupMessage('Fix the problem, then retry this surface.');status('Camera alignment failed');setupPreview();
+  setSetupMessage('Fix the problem and retry, or skip: hands still work on this surface, less precisely.');status('Camera alignment failed');setupPreview();
 }
 function handleCalibrationResult(result){
   const s=surfaces[cameraStep?.surface];
@@ -255,16 +255,31 @@ function acceptCameraAlignment(){
 }
 function finishSetup(){
   if((phase==='choice'||phase==='calibration')&&surfaces.length>alignStart){
-    prompt('Align hand input?',`The camera reads projected markers on each new surface, then you hold your fingertip on C and OK for ${HOLD_S} seconds each. Or continue with a mouse.`,[
-      ['Align hands',startCameraAlignment],['Continue with mouse',enterWorkspace]]);
+    prompt('Align hand input?',`The camera reads projected markers on each new surface, then you hold your fingertip on C and OK for ${HOLD_S} seconds each. Skipping still lets hands work, less precisely; the mouse always works.`,[
+      ['Align hands',startCameraAlignment],['Skip alignment',enterWorkspace]]);
   }else enterWorkspace();
+}
+// Failsafe for surfaces without hand alignment: assume the camera sees the same area as the
+// projection, so a camera point maps through the surface's own corner calibration. Gestures work;
+// accuracy depends on how closely the camera's view matches the projected image.
+function applyFallbackAlignment(){
+  const approximated=[];
+  for(const s of surfaces){
+    if(s.camera)continue;
+    s.camera=[...s.h];s.cameraFallback=true;s.fingerOffset=null;s.cameraError=null;approximated.push(s.number);
+  }
+  return approximated;
 }
 function enterWorkspace(){
   if(cameraStep){clearTimeout(cameraStep.timer);markerToken++;}
   stage.classList.remove('marker-capture');cursor.hidden=true;setHandHover(null);
   phase='workspace';mode='idle';setup.hidden=true;calibration.hidden=true;actions.hidden=false;closePrompt();
   for(const id of ['actions-button','manage-button','close-button'])$(id).hidden=false;
-  alignStart=surfaces.length;render();status('Choose Make Window, Screenshot, or New Surface');
+  const approximated=applyFallbackAlignment();
+  alignStart=surfaces.length;render();
+  status(approximated.length
+    ?`Approximate hand tracking on surface ${approximated.join(', ')} (not aligned). Choose Make Window, Screenshot, or New Surface`
+    :'Choose Make Window, Screenshot, or New Surface');
 }
 // New Surface repeats the startup steps for more surfaces; existing surfaces and windows stay.
 function startNewSurface(){
